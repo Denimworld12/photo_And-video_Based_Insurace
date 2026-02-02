@@ -20,24 +20,23 @@ const ClaimResults = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       console.log(`Fetching results for document: ${documentId}`);
-      
-      // ✅ FIXED: Using api utility instead of fetch
+
       const response = await api.get(`/api/claims/results/${documentId}`);
       const data = response.data;
 
       if (data.success && data.processing_result) {
         setResult(data.processing_result);
-        console.log('Results loaded successfully');
+        console.log('Results loaded successfully:', data.processing_result);
       } else {
         throw new Error('Invalid response format');
       }
     } catch (err) {
       console.error('Error loading results:', err);
-      
-      const errorMessage = err.response?.data?.message || 
-        err.message || 
+
+      const errorMessage = err.response?.data?.message ||
+        err.message ||
         'Failed to load claim results';
       setError(errorMessage);
     } finally {
@@ -56,7 +55,7 @@ const ClaimResults = () => {
           <div className="spinner-large"></div>
           <h2>Analyzing Your Claim...</h2>
           <p>Document ID: {documentId}</p>
-          <p className="loading-subtext">Processing AI analysis and verification</p>
+          <p className="loading-subtext">Processing AI analysis</p>
         </div>
       </div>
     );
@@ -82,19 +81,42 @@ const ClaimResults = () => {
     );
   }
 
-  const confidence = result.overall_confidence || 0;
-  const decision = result.final_decision || {};
-  const recommendation = result.recommendation || {};
-  const summary = result.summary || {};
-  const damage = result.damage_assessment || {};
+  // Extract data from new simplified backend format
+  console.log('📊 FRONTEND - Received result:', result);
+  console.log('📊 FRONTEND - Keys in result:', Object.keys(result));
+
+  const confidence = result.overall_assessment?.confidence_score || 0;
+  const decision = result.overall_assessment || {};
+  const damageType = result.damage_type || 'Unknown';
+  const damageTypeCode = result.damage_type_code || 'other';
+  const damagePercent = result.damage_percentage || 0;
+  const damagedAreaM2 = result.damaged_area_m2 || 0;
+  const damagedAreaAcres = result.damaged_area_acres || 0;
   const payout = result.payout_calculation || {};
   const verification = result.verification_evidence || {};
+  const areaInfo = result.area_info || {};
+  const imagesProcessed = result.images_processed || 0;
+  const imageDetails = result.image_details || [];
+  const totalFieldAreaM2 = result.total_field_area_m2 || areaInfo.total_field_area_m2 || 0;
+  const areaEstimationMethod = result.area_estimation_method || areaInfo.estimation_method || 'ESTIMATED';
+
+  console.log('📊 FRONTEND - Extracted values:');
+  console.log(`   - damageType: ${damageType}`);
+  console.log(`   - damagePercent: ${damagePercent}`);
+  console.log(`   - damagedAreaM2: ${damagedAreaM2}`);
+  console.log(`   - damagedAreaAcres: ${damagedAreaAcres}`);
+  console.log(`   - totalFieldAreaM2: ${totalFieldAreaM2}`);
+  console.log(`   - imagesProcessed: ${imagesProcessed}`);
+  console.log(`   - confidence: ${confidence}`);
+  console.log(`   - decision: ${decision.final_decision}`);
 
   const getStatusClass = (status) => {
     const statusMap = {
       'approved': 'status-approved',
+      'approve': 'status-approved',
       'manual_review': 'status-review',
       'rejected': 'status-rejected',
+      'reject': 'status-rejected',
       'error': 'status-error'
     };
     return statusMap[status?.toLowerCase()] || 'status-default';
@@ -110,10 +132,17 @@ const ClaimResults = () => {
     return icons[decision] || '❓';
   };
 
+  const getSeverityFromPercent = (percent) => {
+    if (percent > 60) return 'critical';
+    if (percent > 35) return 'severe';
+    if (percent > 15) return 'moderate';
+    return 'minimal';
+  };
+
   return (
     <div className="results-page">
       <div className="results-container">
-        
+
         <div className="results-header">
           <div className="header-left">
             <h1>Claim Analysis Result</h1>
@@ -126,42 +155,69 @@ const ClaimResults = () => {
           </div>
         </div>
 
-        <div className={`status-card ${getStatusClass(recommendation.status)}`}>
+        {/* Status Card */}
+        <div className={`status-card ${getStatusClass(decision.final_decision)}`}>
           <div className="status-header">
             <div className="status-icon">
-              {getDecisionIcon(decision.decision)}
+              {getDecisionIcon(decision.final_decision)}
             </div>
             <div className="status-content">
-              <h2>{decision.decision || 'UNKNOWN'}</h2>
-              <p className="status-message">{recommendation.user_message || 'Processing complete'}</p>
+              <h2>{decision.final_decision || 'PROCESSING'}</h2>
+              <p className="status-message">
+                {decision.final_decision === 'APPROVE'
+                  ? '✅ Your claim has been approved!'
+                  : decision.final_decision === 'MANUAL_REVIEW'
+                    ? '🔍 Your claim requires manual review by our team'
+                    : decision.final_decision === 'REJECT'
+                      ? '❌ Claim rejected - please capture clearer images'
+                      : 'Processing your claim...'}
+              </p>
             </div>
           </div>
-          
+
           <div className="confidence-bar">
             <div className="confidence-label">
               <span>AI Confidence Score</span>
               <span className="confidence-value">{(confidence * 100).toFixed(1)}%</span>
             </div>
             <div className="progress-bar">
-              <div 
+              <div
                 className={`progress-fill ${confidence >= 0.7 ? 'high' : confidence >= 0.3 ? 'medium' : 'low'}`}
                 style={{ width: `${confidence * 100}%` }}
               />
             </div>
           </div>
+        </div>
 
-          <div className="status-details">
-            <div className="detail-row">
-              <span className="detail-label">Reason:</span>
-              <span className="detail-value">{recommendation.reason || 'N/A'}</span>
+        {/* Primary Damage Info Card */}
+        <div className="damage-overview-card">
+          <h3>🌾 Damage Assessment</h3>
+          <div className="damage-overview-grid">
+            <div className="damage-stat">
+              <span className="stat-label">Damage Type</span>
+              <span className="stat-value damage-type">{damageType}</span>
+              <span className="stat-code">({damageTypeCode})</span>
             </div>
-            <div className="detail-row">
-              <span className="detail-label">Next Action:</span>
-              <span className="detail-value">{recommendation.next_steps || 'N/A'}</span>
+            <div className="damage-stat">
+              <span className="stat-label">Damage Percentage</span>
+              <span className="stat-value highlight">{damagePercent.toFixed(1)}%</span>
+              <span className={`severity-badge ${getSeverityFromPercent(damagePercent)}`}>
+                {getSeverityFromPercent(damagePercent).toUpperCase()}
+              </span>
+            </div>
+            <div className="damage-stat">
+              <span className="stat-label">Damaged Area</span>
+              <span className="stat-value">{damagedAreaM2.toFixed(1)} m²</span>
+              <span className="stat-sub">{damagedAreaAcres.toFixed(4)} acres</span>
+            </div>
+            <div className="damage-stat">
+              <span className="stat-label">Images Analyzed</span>
+              <span className="stat-value">{imagesProcessed}</span>
             </div>
           </div>
         </div>
 
+        {/* Payout Card */}
         {payout && Object.keys(payout).length > 0 && (
           <div className="payout-card">
             <h3>💰 Payout Information</h3>
@@ -174,18 +230,18 @@ const ClaimResults = () => {
               </div>
               <div className="payout-item">
                 <span className="payout-label">Damage %</span>
-                <span className="payout-amount">{payout.damage_percent || 0}%</span>
+                <span className="payout-amount">{payout.damage_percent || damagePercent || 0}%</span>
               </div>
               <div className="payout-item highlight">
                 <span className="payout-label">Final Payout</span>
                 <span className="payout-amount">
-                  ₹{(payout.final_payout_amount || 0).toLocaleString('en-IN')}
+                  ₹{(payout.payout_amount || payout.final_payout_amount || 0).toLocaleString('en-IN')}
                 </span>
               </div>
               <div className="payout-item">
                 <span className="payout-label">Status</span>
-                <span className={`payout-status ${payout.payout_status}`}>
-                  {payout.payout_status?.replace(/_/g, ' ').toUpperCase() || 'PENDING'}
+                <span className={`payout-status ${decision.final_decision === 'APPROVE' ? 'approved' : 'pending'}`}>
+                  {decision.final_decision === 'APPROVE' ? 'APPROVED' : 'PENDING'}
                 </span>
               </div>
             </div>
@@ -193,103 +249,100 @@ const ClaimResults = () => {
         )}
 
         <div className="expandable-sections">
-          
+
+          {/* Area Information */}
           <div className="expandable-card">
-            <div 
-              className="card-header" 
-              onClick={() => toggleSection('summary')}
+            <div
+              className="card-header"
+              onClick={() => toggleSection('area')}
               role="button"
               tabIndex={0}
               onKeyPress={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
-                  toggleSection('summary');
+                  toggleSection('area');
                 }
               }}
             >
-              <h3>📊 Processing Summary</h3>
-              <span className="toggle-icon">{expandedSection === 'summary' ? '−' : '+'}</span>
+              <h3>📐 Area Information</h3>
+              <span className="toggle-icon">{expandedSection === 'area' ? '−' : '+'}</span>
             </div>
-            {expandedSection === 'summary' && (
+            {expandedSection === 'area' && (
               <div className="card-content">
-                <div className="summary-grid">
-                  <div className="summary-item">
-                    <div className="summary-value">{summary.total_files_processed || 0}</div>
-                    <div className="summary-label">Files Processed</div>
+                <div className="area-grid">
+                  <div className="area-item">
+                    <span className="area-label">Total Field Area</span>
+                    <span className="area-value">{totalFieldAreaM2.toFixed(1)} m²</span>
                   </div>
-                  <div className="summary-item">
-                    <div className="summary-value success">{summary.successful_extractions || 0}</div>
-                    <div className="summary-label">Successful</div>
+                  <div className="area-item">
+                    <span className="area-label">Damaged Area</span>
+                    <span className="area-value">{damagedAreaM2.toFixed(1)} m²</span>
                   </div>
-                  <div className="summary-item">
-                    <div className="summary-value">{summary.exif_data_extracted || 0}</div>
-                    <div className="summary-label">EXIF Extracted</div>
+                  <div className="area-item">
+                    <span className="area-label">Damaged Area (Acres)</span>
+                    <span className="area-value">{damagedAreaAcres.toFixed(4)} acres</span>
                   </div>
-                  <div className="summary-item">
-                    <div className="summary-value">{summary.weather_data_obtained || 0}</div>
-                    <div className="summary-label">Weather Verified</div>
-                  </div>
-                  <div className="summary-item">
-                    <div className="summary-value">{summary.geofencing_successful || 0}</div>
-                    <div className="summary-label">Geofencing OK</div>
-                  </div>
-                  <div className="summary-item">
-                    <div className="summary-value">{summary.coordinate_matches || 0}</div>
-                    <div className="summary-label">GPS Matches</div>
+                  <div className="area-item">
+                    <span className="area-label">Estimation Method</span>
+                    <span className="area-value method-badge">
+                      {areaEstimationMethod}
+                    </span>
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {damage && Object.keys(damage).length > 0 && (
+          {/* Image Details */}
+          {imageDetails.length > 0 && (
             <div className="expandable-card">
-              <div 
-                className="card-header" 
-                onClick={() => toggleSection('damage')}
+              <div
+                className="card-header"
+                onClick={() => toggleSection('images')}
                 role="button"
                 tabIndex={0}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
-                    toggleSection('damage');
+                    toggleSection('images');
                   }
                 }}
               >
-                <h3>🌾 Damage Assessment</h3>
-                <span className="toggle-icon">{expandedSection === 'damage' ? '−' : '+'}</span>
+                <h3>📸 Image Analysis Details</h3>
+                <span className="toggle-icon">{expandedSection === 'images' ? '−' : '+'}</span>
               </div>
-              {expandedSection === 'damage' && (
+              {expandedSection === 'images' && (
                 <div className="card-content">
-                  <div className="damage-comparison">
-                    <div className="damage-item">
-                      <span className="damage-label">AI Calculated</span>
-                      <span className="damage-value">{damage.ai_calculated_damage_percent || 0}%</span>
-                    </div>
-                    <div className="damage-item">
-                      <span className="damage-label">Farmer Claimed</span>
-                      <span className="damage-value">{damage.farmer_claimed_damage_percent || 0}%</span>
-                    </div>
-                    <div className="damage-item highlight">
-                      <span className="damage-label">Final Damage</span>
-                      <span className="damage-value">{damage.final_damage_percent || 0}%</span>
-                    </div>
-                  </div>
-                  <div className="damage-meta">
-                    <div className="meta-row">
-                      <span>Severity:</span>
-                      <span className={`severity-badge ${damage.severity}`}>
-                        {damage.severity?.toUpperCase() || 'N/A'}
-                      </span>
-                    </div>
+                  <div className="images-list">
+                    {imageDetails.map((img, idx) => (
+                      <div key={idx} className="image-item">
+                        <div className="image-info">
+                          <span className="image-name">Image {idx + 1}</span>
+                          <span className="image-type">
+                            {img.damage_type_name || img.damage_type_code || 'N/A'}
+                          </span>
+                        </div>
+                        <div className="image-stats">
+                          <span className="image-damage">
+                            Damage: {(img.damage_percentage || 0).toFixed(1)}%
+                          </span>
+                          {img.vegetation_index !== undefined && (
+                            <span className="image-confidence">
+                              NDVI: {img.vegetation_index.toFixed(3)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
           )}
 
+          {/* Verification */}
           {verification && Object.keys(verification).length > 0 && (
             <div className="expandable-card">
-              <div 
-                className="card-header" 
+              <div
+                className="card-header"
                 onClick={() => toggleSection('verification')}
                 role="button"
                 tabIndex={0}
@@ -299,7 +352,7 @@ const ClaimResults = () => {
                   }
                 }}
               >
-                <h3>✓ Verification Evidence</h3>
+                <h3>✓ Verification Status</h3>
                 <span className="toggle-icon">{expandedSection === 'verification' ? '−' : '+'}</span>
               </div>
               {expandedSection === 'verification' && (
@@ -313,100 +366,10 @@ const ClaimResults = () => {
                       <span className="check-icon">{verification.location_verified ? '✓' : '✗'}</span>
                       <span>Location Verified</span>
                     </div>
-                    <div className={`verification-item ${verification.damage_verified ? 'verified' : 'not-verified'}`}>
-                      <span className="check-icon">{verification.damage_verified ? '✓' : '✗'}</span>
-                      <span>Damage Verified</span>
-                    </div>
-                    <div className={`verification-item ${verification.weather_supports_claim ? 'verified' : 'not-verified'}`}>
-                      <span className="check-icon">{verification.weather_supports_claim ? '✓' : '✗'}</span>
-                      <span>Weather Supports Claim</span>
-                    </div>
                   </div>
                   {verification.processing_note && (
                     <div className="verification-note">
                       <strong>Note:</strong> {verification.processing_note}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {result.detailed_scores && Object.keys(result.detailed_scores).length > 0 && (
-            <div className="expandable-card">
-              <div 
-                className="card-header" 
-                onClick={() => toggleSection('scores')}
-                role="button"
-                tabIndex={0}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    toggleSection('scores');
-                  }
-                }}
-              >
-                <h3>📈 Detailed Scores</h3>
-                <span className="toggle-icon">{expandedSection === 'scores' ? '−' : '+'}</span>
-              </div>
-              {expandedSection === 'scores' && (
-                <div className="card-content">
-                  <div className="scores-list">
-                    {Object.entries(result.detailed_scores).map(([key, value]) => (
-                      <div key={key} className="score-row">
-                        <span className="score-label">{key.replace(/_/g, ' ').toUpperCase()}</span>
-                        <div className="score-bar">
-                          <div 
-                            className="score-fill"
-                            style={{ width: `${(value || 0) * 100}%` }}
-                          />
-                          <span className="score-value">{((value || 0) * 100).toFixed(0)}%</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {result.fraud_indicators && (
-            <div className="expandable-card">
-              <div 
-                className="card-header" 
-                onClick={() => toggleSection('fraud')}
-                role="button"
-                tabIndex={0}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    toggleSection('fraud');
-                  }
-                }}
-              >
-                <h3>🚨 Fraud Analysis</h3>
-                <span className="toggle-icon">{expandedSection === 'fraud' ? '−' : '+'}</span>
-              </div>
-              {expandedSection === 'fraud' && (
-                <div className="card-content">
-                  <div className="fraud-summary">
-                    <div className="fraud-stat">
-                      <span className="fraud-label">Red Flags</span>
-                      <span className="fraud-value">{result.fraud_indicators.total_red_flags || 0}</span>
-                    </div>
-                    <div className="fraud-stat">
-                      <span className="fraud-label">Fraud Likelihood</span>
-                      <span className="fraud-value">
-                        {((result.fraud_indicators.fraud_likelihood || 0) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                  {result.fraud_indicators.fraud_indicators?.length > 0 && (
-                    <div className="fraud-list">
-                      {result.fraud_indicators.fraud_indicators.map((indicator, idx) => (
-                        <div key={idx} className={`fraud-item severity-${indicator.severity}`}>
-                          <span className="fraud-category">{indicator.category}</span>
-                          <span className="fraud-detail">{indicator.detail}</span>
-                        </div>
-                      ))}
                     </div>
                   )}
                 </div>

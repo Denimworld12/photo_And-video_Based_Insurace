@@ -816,6 +816,174 @@
   color: white;
 }
 
+/* DAMAGE OVERVIEW CARD */
+.damage-overview-card {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 12px rgba(27, 54, 93, 0.08);
+}
+
+.damage-overview-card h3 {
+  font-size: 1.3rem;
+  color: #1B365D;
+  margin: 0 0 1rem 0;
+}
+
+.damage-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.damage-stat {
+  background: #f9fafb;
+  padding: 1rem;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1B365D;
+}
+
+.stat-value.highlight {
+  color: #22C55E;
+}
+
+.stat-value.damage-type {
+  font-size: 1.2rem;
+}
+
+.stat-code {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 0.25rem;
+}
+
+.stat-sub {
+  display: block;
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+.severity-badge.critical {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* AREA INFO */
+.area-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.area-item {
+  background: #f9fafb;
+  padding: 1rem;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.area-label {
+  display: block;
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.area-value {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #1B365D;
+}
+
+.method-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+/* IMAGES LIST */
+.images-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.image-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.image-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.image-name {
+  font-size: 0.85rem;
+  color: #333;
+  font-weight: 500;
+}
+
+.image-type {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.image-stats {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.image-damage {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.image-confidence {
+  color: #22C55E;
+  font-weight: 600;
+}
+
+/* PAYOUT STATUS */
+.payout-status.approved {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.payout-status.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 /* RESPONSIVE */
 @media (max-width: 768px) {
   .results-header {
@@ -823,11 +991,19 @@
     text-align: center;
   }
 
-  .payout-grid {
+  .payout-grid,
+  .damage-overview-grid,
+  .area-grid {
     grid-template-columns: 1fr;
   }
 
   .action-buttons {
     flex-direction: column;
+  }
+
+  .image-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
   }
 }

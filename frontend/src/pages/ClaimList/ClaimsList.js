@@ -1,17 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
 import api from '../../utils/api';
 import './ClaimsList.css';
-
-const CLAIM_STATUS = {
-    DRAFT: 'draft',
-    SUBMITTED: 'submitted',
-    PROCESSING: 'processing',
-    APPROVED: 'approved',
-    REJECTED: 'rejected',
-    PAYOUT_COMPLETE: 'payout-complete'
-};
 
 const ClaimsList = () => {
     const [claims, setClaims] = useState([]);
@@ -21,7 +11,6 @@ const ClaimsList = () => {
     const [totalPages, setTotalPages] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
     const [error, setError] = useState(null);
-    const { user } = useAuth();
     const navigate = useNavigate();
 
     useEffect(() => {

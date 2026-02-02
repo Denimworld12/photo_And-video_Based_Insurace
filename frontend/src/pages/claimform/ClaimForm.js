@@ -8,7 +8,7 @@ import './claimform.css';
 const ClaimForm = () => {
   const { insuranceId } = useParams();
   const navigate = useNavigate();
-  const { claimState, setSelectedInsurance, updateFormData, generateDocumentId } = useClaim();
+  const { setSelectedInsurance, updateFormData, generateDocumentId } = useClaim();
 
   const [insurance, setInsurance] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,7 +34,7 @@ const ClaimForm = () => {
     try {
       setLoading(true);
       const response = await api.get(`/api/insurance/${insuranceId}`);
-      
+
       if (response.data.insurance) {
         setInsurance(response.data.insurance);
         setSelectedInsurance(response.data.insurance);
@@ -100,8 +100,8 @@ const ClaimForm = () => {
 
     } catch (error) {
       console.error('Failed to initialize claim:', error);
-      
-      const errorMessage = error.response?.data?.message || 
+
+      const errorMessage = error.response?.data?.message ||
         'Failed to process your claim. Please try again.';
       alert(errorMessage);
     } finally {
@@ -128,8 +128,8 @@ const ClaimForm = () => {
     <div className="claim-form-page">
       <div className="gov-header">
         <div className="gov-emblem">
-          <img 
-            src="/images/government-emblem.png" 
+          <img
+            src="/images/government-emblem.png"
             alt="Government Emblem"
             loading="lazy"
           />

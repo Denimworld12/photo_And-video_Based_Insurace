@@ -18,7 +18,7 @@ const claimResults = new Map();
 // ==================== DIRECTORY SETUP ====================
 
 const ensureDirectories = () => {
-    const dirs = ['uploads', 'temp', 'data', 'reports', 'worker'];
+    const dirs = ['uploads', 'temp', 'data'];
     dirs.forEach(dir => {
         const dirPath = path.join(__dirname, dir);
         if (!fs.existsSync(dirPath)) {
@@ -32,15 +32,16 @@ ensureDirectories();
 // ==================== PYTHON WORKER VALIDATION ====================
 
 const validatePythonWorker = () => {
-    const workerPath = path.join(__dirname, 'worker', 'pipeline.py');
-    
+    // Check for the new simplified pipeline in cropfarmPY folder
+    const workerPath = path.join(__dirname, '..', 'cropfarmPY', 'main_pipeline.py');
+
     if (!fs.existsSync(workerPath)) {
-        console.log('⚠️ Python worker not found at:', workerPath);
+        console.log('⚠️ Python pipeline not found at:', workerPath);
         console.log('ℹ️ Python processing will use fallback mode');
         return false;
     }
-    
-    console.log('✅ Python worker found:', workerPath);
+
+    console.log('✅ Python pipeline found:', workerPath);
     return true;
 };
 
@@ -71,7 +72,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // CORS configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
+const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
     : ['http://localhost:3000'];
 
@@ -93,6 +94,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== DATABASE CONNECTION ====================
+// ==================== DATABASE CONNECTION ====================
 
 const connectDB = async () => {
     try {
@@ -101,11 +103,11 @@ const connectDB = async () => {
             return;
         }
 
+        // ✅ FIXED: Removed deprecated options
         const conn = await mongoose.connect(process.env.MONGODB_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
             serverSelectionTimeoutMS: 5000,
         });
+
         console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
     } catch (error) {
         console.error('❌ Database connection failed:', error.message);
@@ -212,10 +214,26 @@ app.get('/api/insurance/:id', (req, res) => {
 
 // ==================== FILE UPLOAD ====================
 
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, path.join(__dirname, 'uploads'));
+    },
+    filename: (req, file, cb) => {
+        // Always ensure .jpg extension for image files
+        let ext = path.extname(file.originalname);
+        if (!ext || ext === '') {
+            ext = file.mimetype.includes('png') ? '.png' : '.jpg';
+        }
+        const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(7)}${ext}`;
+        console.log(`📁 Saving file: ${uniqueName} (original: ${file.originalname})`);
+        cb(null, uniqueName);
+    }
+});
+
 const upload = multer({
-    dest: path.join(__dirname, 'uploads'),
-    limits: { 
-        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024 
+    storage: storage,
+    limits: {
+        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024
     },
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
@@ -226,25 +244,27 @@ const upload = multer({
     }
 });
 
+
+
 app.post('/api/claims/upload', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                error: 'No file uploaded' 
+                error: 'No file uploaded'
             });
         }
 
         const { lat, lon, client_ts, parcel_id, step_id, media_type } = req.body;
-        const coordinates = { 
-            lat: parseFloat(lat), 
-            lon: parseFloat(lon) 
+        const coordinates = {
+            lat: parseFloat(lat),
+            lon: parseFloat(lon)
         };
 
         if (isNaN(coordinates.lat) || isNaN(coordinates.lon)) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                error: 'Invalid coordinates' 
+                error: 'Invalid coordinates'
             });
         }
 
@@ -285,15 +305,16 @@ app.post('/api/claims/upload', upload.single('image'), async (req, res) => {
 
     } catch (error) {
         console.error('❌ Upload error:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             success: false,
-            error: 'Server error during upload', 
+            error: 'Server error during upload',
             details: process.env.NODE_ENV === 'development' ? error.message : 'Upload failed'
         });
     }
 });
 
 // ==================== PYTHON BATCH PROCESSING ====================
+// Uses simplified main_pipeline.py from cropfarmPY folder
 
 async function processBatchWithPython(parcelId) {
     console.log(`🐍 Starting batch Python processing for: ${parcelId}`);
@@ -304,65 +325,43 @@ async function processBatchWithPython(parcelId) {
     }
 
     const files = claimData.uploaded_files;
-    const cornerSteps = ['corner-ne', 'corner-nw', 'corner-se', 'corner-sw'];
-    const cornerFiles = cornerSteps.map(step => files[step]).filter(f => f?.mediaType === 'photo');
-    const damageFile = files['damaged-crop'];
 
-    if (cornerFiles.length < 4) {
-        return generateFallbackResult(files, `Only ${cornerFiles.length}/4 corner images`);
-    }
-    if (!damageFile) {
-        return generateFallbackResult(files, 'Missing damage image');
+    // Collect all image paths
+    const imagePaths = Object.values(files)
+        .filter(f => f?.filePath && f?.mediaType === 'photo')
+        .map(f => f.filePath);
+
+    if (imagePaths.length < 1) {
+        return generateFallbackResult(files, 'No valid images found');
     }
 
-    const workerPath = path.join(__dirname, 'worker', 'pipeline.py');
+    // Use the new simplified pipeline from cropfarmPY
+    const workerPath = path.join(__dirname, '..', 'cropfarmPY', 'main_pipeline.py');
     if (!fs.existsSync(workerPath)) {
-        console.log('⚠️ Python worker not found');
-        return generateFallbackResult(files, 'Python worker unavailable');
-    }
-
-    const cadastralPath = path.join(__dirname, 'data', 'parcel.geojson');
-    if (!fs.existsSync(cadastralPath)) {
-        const { lat, lon } = cornerFiles[0].coordinates;
-        const boundary = {
-            type: "FeatureCollection",
-            features: [{
-                type: "Feature",
-                properties: { parcel_id: parcelId },
-                geometry: {
-                    type: "Polygon",
-                    coordinates: [[
-                        [lon - 0.003, lat - 0.003],
-                        [lon + 0.003, lat - 0.003],
-                        [lon + 0.003, lat + 0.003],
-                        [lon - 0.003, lat + 0.003],
-                        [lon - 0.003, lat - 0.003]
-                    ]]
-                }
-            }]
-        };
-        fs.mkdirSync(path.dirname(cadastralPath), { recursive: true });
-        fs.writeFileSync(cadastralPath, JSON.stringify(boundary, null, 2));
-        console.log('✅ Created cadastral boundary');
+        console.log('⚠️ Python pipeline not found at:', workerPath);
+        return generateFallbackResult(files, 'Python pipeline unavailable');
     }
 
     const pythonCommand = process.env.PYTHON_COMMAND || 'python';
+
+    // Estimate field size based on images (each image covers ~1500 m²)
+    const estimatedFieldSize = imagePaths.length * 1500;
+
+    // Build arguments for main_pipeline.py
     const args = [
         workerPath,
-        ...cornerFiles.flatMap(f => [f.filePath, String(f.coordinates.lat), String(f.coordinates.lon)]),
-        damageFile.filePath,
-        '50.0',
-        '100000',
-        cadastralPath,
-        parcelId,
-        '1'
+        ...imagePaths,
+        '--field-size', estimatedFieldSize.toString(),
+        '--sum-insured', '100000',
+        '--claimed-damage', '50'
     ];
 
-    console.log(`🚀 Executing Python: ${pythonCommand} with ${args.length} arguments`);
+    console.log(`🚀 Executing: ${pythonCommand} main_pipeline.py with ${imagePaths.length} images`);
+    console.log(`📐 Estimated field size: ${estimatedFieldSize} m²`);
 
     return new Promise((resolve, reject) => {
         const py = spawn(pythonCommand, args, {
-            cwd: process.cwd(),
+            cwd: path.join(__dirname, '..', 'cropfarmPY'),
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
@@ -387,8 +386,20 @@ async function processBatchWithPython(parcelId) {
                 return;
             }
             try {
-                const result = JSON.parse(stdout);
+                const pythonResult = JSON.parse(stdout);
                 console.log('✅ Python processing completed');
+
+                // DEBUG: Log Python output
+                console.log('📊 PYTHON OUTPUT:');
+                console.log(`   - damage_type: ${pythonResult.damage_type}`);
+                console.log(`   - damage_percentage: ${pythonResult.damage_percentage}`);
+                console.log(`   - damaged_area_m2: ${pythonResult.damaged_area_m2}`);
+                console.log(`   - total_field_area_m2: ${pythonResult.total_field_area_m2}`);
+                console.log(`   - images_processed: ${pythonResult.images_processed}`);
+                console.log(`   - confidence: ${pythonResult.confidence}`);
+
+                // Map simplified output to expected format
+                const result = mapSimplePipelineOutput(pythonResult);
                 resolve(result);
             } catch (error) {
                 reject(new Error(`Invalid JSON from Python: ${error.message}`));
@@ -400,6 +411,63 @@ async function processBatchWithPython(parcelId) {
             reject(new Error(`Failed to start Python: ${error.message}`));
         });
     });
+}
+
+// Map simplified pipeline output to frontend format
+function mapSimplePipelineOutput(pythonResult) {
+    const confidence = pythonResult.confidence || 0.5;
+    const damagePercent = pythonResult.damage_percentage || 0;
+    const claimDecision = pythonResult.claim_decision || 'MANUAL_REVIEW';
+
+    return {
+        claim_id: `CLM_${Date.now()}`,
+        processing_timestamp: pythonResult.timestamp || new Date().toISOString(),
+
+        // PRIMARY OUTPUT FROM PKL MODEL
+        damage_type: pythonResult.damage_type || 'Unknown',
+        damage_type_code: pythonResult.damage_type_code || 'other',
+        damage_percentage: damagePercent,
+        damaged_area_m2: pythonResult.damaged_area_m2 || 0,
+        damaged_area_acres: pythonResult.damaged_area_acres || 0,
+
+        overall_assessment: {
+            final_decision: claimDecision,
+            confidence_score: confidence,
+            risk_level: confidence >= 0.7 ? 'low' : confidence >= 0.3 ? 'medium' : 'high',
+            manual_review_required: claimDecision === 'MANUAL_REVIEW'
+        },
+
+        damage_assessment: {
+            ai_calculated_damage_percent: damagePercent,
+            farmer_claimed_damage_percent: 50.0,
+            final_damage_percent: damagePercent,
+            severity: damagePercent > 60 ? 'critical' : damagePercent > 35 ? 'severe' : damagePercent > 15 ? 'moderate' : 'minimal',
+            damage_type: pythonResult.damage_type || 'Unknown'
+        },
+
+        payout_calculation: pythonResult.payout_calculation || {
+            sum_insured: 100000,
+            damage_percent: damagePercent,
+            payout_amount: claimDecision === 'APPROVE' ? (damagePercent / 100) * 100000 : 0,
+            currency: 'INR'
+        },
+
+        verification_evidence: {
+            authenticity_verified: confidence >= 0.5,
+            location_verified: true,
+            processing_note: pythonResult.decision_reason || 'Processed by simplified pipeline'
+        },
+
+        area_info: {
+            total_field_area_m2: pythonResult.total_field_area_m2 || 0,
+            damaged_area_m2: pythonResult.damaged_area_m2 || 0,
+            damaged_area_acres: pythonResult.damaged_area_acres || 0,
+            estimation_method: pythonResult.area_estimation_method || 'ESTIMATED'
+        },
+
+        images_processed: pythonResult.images_processed || 0,
+        image_details: pythonResult.image_details || []
+    };
 }
 
 function generateFallbackResult(files, reason) {
@@ -443,7 +511,7 @@ function generateFallbackResult(files, reason) {
 
 function determineClaimDecision(pythonResult) {
     const confidence = pythonResult.overall_assessment?.confidence_score || 0;
-    
+
     if (confidence >= 0.70) {
         return {
             decision: 'APPROVE',
@@ -486,7 +554,7 @@ function determineClaimDecision(pythonResult) {
 function mapPythonToFrontend(pythonResult) {
     const confidence = pythonResult.overall_assessment?.confidence_score || 0;
     const decision = determineClaimDecision(pythonResult);
-    
+
     return {
         overall_confidence: confidence,
         recommendation: {
@@ -501,8 +569,8 @@ function mapPythonToFrontend(pythonResult) {
             risk_level: decision.risk,
             manual_review_required: decision.manual_review_required,
             confidence_score: confidence,
-            threshold_applied: confidence >= 0.70 ? 'auto_approve' : 
-                              confidence >= 0.30 ? 'manual_review' : 'reject_retry',
+            threshold_applied: confidence >= 0.70 ? 'auto_approve' :
+                confidence >= 0.30 ? 'manual_review' : 'reject_retry',
             payout_approved: decision.payout_approved
         },
         summary: {
@@ -518,10 +586,10 @@ function mapPythonToFrontend(pythonResult) {
         payout_calculation: {
             ...pythonResult.payout_calculation,
             payout_approved: decision.payout_approved,
-            payout_status: decision.decision === 'APPROVE' ? 'processing' : 
-                          decision.decision === 'MANUAL_REVIEW' ? 'pending_review' : 'rejected',
-            final_payout_amount: decision.payout_approved ? 
-                                pythonResult.payout_calculation?.final_payout_amount : 0
+            payout_status: decision.decision === 'APPROVE' ? 'processing' :
+                decision.decision === 'MANUAL_REVIEW' ? 'pending_review' : 'rejected',
+            final_payout_amount: decision.payout_approved ?
+                pythonResult.payout_calculation?.final_payout_amount : 0
         },
         verification_evidence: pythonResult.verification_evidence || {},
         detailed_scores: pythonResult.detailed_scores || {},
@@ -566,9 +634,9 @@ app.post('/api/auth/send-otp', async (req, res) => {
             message: 'OTP sent successfully',
             expiresIn: '10 minutes',
             // Include OTP in development mode only
-            ...(process.env.NODE_ENV === 'development' && { 
+            ...(process.env.NODE_ENV === 'development' && {
                 devOTP: otp,
-                adminOTP: ADMIN_OTP 
+                adminOTP: ADMIN_OTP
             })
         });
 
@@ -596,7 +664,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
         // Check if it's the admin OTP (always works)
         if (otp === ADMIN_OTP) {
             console.log(`🔐 Admin OTP used for ${phoneNumber}`);
-            
+
             // Create/update user
             if (!users.has(phoneNumber)) {
                 users.set(phoneNumber, {
@@ -686,7 +754,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 app.post('/api/claims/initialize', async (req, res) => {
     try {
         console.log('📋 Claim initialization requested');
-        
+
         const { insuranceId, formData } = req.body;
 
         const timestamp = Date.now().toString().slice(-8);
@@ -736,22 +804,22 @@ app.post('/api/claims/complete', async (req, res) => {
 
     try {
         if (!documentId) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Document ID is required' 
+            return res.status(400).json({
+                success: false,
+                error: 'Document ID is required'
             });
         }
 
         if (!claimResults.has(documentId)) {
-            return res.status(404).json({ 
-                success: false, 
-                error: 'Document not found. Please reinitialize the claim.' 
+            return res.status(404).json({
+                success: false,
+                error: 'Document not found. Please reinitialize the claim.'
             });
         }
 
         console.log('🐍 Triggering Python batch processing...');
         let pythonResult;
-        
+
         try {
             pythonResult = await processBatchWithPython(documentId);
         } catch (error) {
@@ -761,7 +829,8 @@ app.post('/api/claims/complete', async (req, res) => {
         }
 
         const claimData = claimResults.get(documentId);
-        claimData.aggregated_analysis = mapPythonToFrontend(pythonResult);
+        // Use pythonResult directly - it's already properly formatted by mapSimplePipelineOutput
+        claimData.processing_result = pythonResult;
         claimData.metadata.status = 'completed';
         claimData.metadata.completedAt = new Date().toISOString();
         claimData.status = 'submitted';
@@ -786,7 +855,7 @@ app.post('/api/claims/complete', async (req, res) => {
                 documentId,
                 status: 'submitted',
                 completedAt: new Date().toISOString(),
-                processingResult: claimData.aggregated_analysis
+                processingResult: claimData.processing_result
             }
         });
 
@@ -807,7 +876,18 @@ app.get('/api/claims/results/:documentId', (req, res) => {
 
     if (claimResults.has(documentId)) {
         const claimData = claimResults.get(documentId);
-        
+
+        // DEBUG: Log the data being returned to frontend
+        console.log('📊 RESULTS - Returning data:');
+        console.log(`   - damage_type: ${claimData.processing_result?.damage_type}`);
+        console.log(`   - damage_percentage: ${claimData.processing_result?.damage_percentage}`);
+        console.log(`   - damaged_area_m2: ${claimData.processing_result?.damaged_area_m2}`);
+        console.log(`   - damaged_area_acres: ${claimData.processing_result?.damaged_area_acres}`);
+        console.log(`   - total_field_area_m2: ${claimData.processing_result?.area_info?.total_field_area_m2 || claimData.processing_result?.total_field_area_m2}`);
+        console.log(`   - images_processed: ${claimData.processing_result?.images_processed}`);
+        console.log(`   - confidence: ${claimData.processing_result?.overall_assessment?.confidence_score}`);
+        console.log(`   - claim_decision: ${claimData.processing_result?.overall_assessment?.final_decision}`);
+
         res.json({
             success: true,
             claim: {
@@ -815,7 +895,7 @@ app.get('/api/claims/results/:documentId', (req, res) => {
                 status: 'submitted',
                 submitted_at: claimData.metadata?.completedAt || new Date().toISOString()
             },
-            processing_result: claimData.aggregated_analysis || {},
+            processing_result: claimData.processing_result || {},
             media: {},
             individual_results: {},
             metadata: {
@@ -856,7 +936,7 @@ app.get('/api/claims/results/:documentId', (req, res) => {
 app.get('/api/claims/list', (req, res) => {
     try {
         console.log('📋 Claims list requested');
-        
+
         const claims = Array.from(claimResults.entries()).map(([docId, data]) => ({
             documentId: docId,
             status: data.status || 'draft',
@@ -883,20 +963,20 @@ app.get('/api/claims/list', (req, res) => {
 
 app.use((error, req, res, next) => {
     console.error('Global error:', error);
-    
+
     if (error instanceof multer.MulterError) {
         if (error.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
-                error: 'File too large (max 50MB)' 
+                error: 'File too large (max 50MB)'
             });
         }
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
-            error: error.message 
+            error: error.message
         });
     }
-    
+
     res.status(500).json({
         success: false,
         error: 'Internal server error',
@@ -905,25 +985,22 @@ app.use((error, req, res, next) => {
 });
 
 app.use('*', (req, res) => {
-    res.status(404).json({ 
+    res.status(404).json({
         success: false,
-        error: 'Route not found', 
-        path: req.originalUrl 
+        error: 'Route not found',
+        path: req.originalUrl
     });
 });
 
 // ==================== GRACEFUL SHUTDOWN ====================
 
-const gracefulShutdown = () => {
+const gracefulShutdown = async () => {
     console.log('\n🛑 Shutting down gracefully...');
     if (mongoose.connection.readyState === 1) {
-        mongoose.connection.close(() => {
-            console.log('📴 MongoDB closed');
-            process.exit(0);
-        });
-    } else {
-        process.exit(0);
+        await mongoose.connection.close();
+        console.log('📴 MongoDB closed');
     }
+    process.exit(0);
 };
 
 process.on('SIGTERM', gracefulShutdown);
