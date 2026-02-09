@@ -326,10 +326,21 @@ async function processBatchWithPython(parcelId) {
 
     const files = claimData.uploaded_files;
 
-    // Collect all image paths
-    const imagePaths = Object.values(files)
-        .filter(f => f?.filePath && f?.mediaType === 'photo')
-        .map(f => f.filePath);
+    // Collect all image paths and find a user coordinate
+    const imagePaths = [];
+    let userLat = null;
+    let userLon = null;
+
+    Object.values(files).forEach(f => {
+        if (f?.filePath && f?.mediaType === 'photo') {
+            imagePaths.push(f.filePath);
+            // Use the first available coordinate as user location reference
+            if (userLat === null && f.coordinates && f.coordinates.lat) {
+                userLat = f.coordinates.lat;
+                userLon = f.coordinates.lon;
+            }
+        }
+    });
 
     if (imagePaths.length < 1) {
         return generateFallbackResult(files, 'No valid images found');
@@ -356,8 +367,19 @@ async function processBatchWithPython(parcelId) {
         '--claimed-damage', '50'
     ];
 
+    // Add User Coordinates if available
+    if (userLat !== null && userLon !== null) {
+        args.push('--user-lat', userLat.toString());
+        args.push('--user-lon', userLon.toString());
+    }
+
+    // Add Weather API Key
+    if (process.env.WEATHER_API_KEY) {
+        args.push('--api-key', process.env.WEATHER_API_KEY);
+    }
+
     console.log(`🚀 Executing: ${pythonCommand} main_pipeline.py with ${imagePaths.length} images`);
-    console.log(`📐 Estimated field size: ${estimatedFieldSize} m²`);
+    console.log(`� User Location: ${userLat}, ${userLon}`);
 
     return new Promise((resolve, reject) => {
         const py = spawn(pythonCommand, args, {
@@ -390,13 +412,13 @@ async function processBatchWithPython(parcelId) {
                 console.log('✅ Python processing completed');
 
                 // DEBUG: Log Python output
+                const assessment = pythonResult.overall_assessment || {};
                 console.log('📊 PYTHON OUTPUT:');
                 console.log(`   - damage_type: ${pythonResult.damage_type}`);
                 console.log(`   - damage_percentage: ${pythonResult.damage_percentage}`);
-                console.log(`   - damaged_area_m2: ${pythonResult.damaged_area_m2}`);
-                console.log(`   - total_field_area_m2: ${pythonResult.total_field_area_m2}`);
-                console.log(`   - images_processed: ${pythonResult.images_processed}`);
-                console.log(`   - confidence: ${pythonResult.confidence}`);
+                console.log(`   - decision: ${assessment.final_decision}`);
+                console.log(`   - confidence: ${assessment.confidence_score}`);
+                console.log(`   - verification: w=${pythonResult.verification_results?.weather?.status} g=${pythonResult.verification_results?.geolocation?.status}`);
 
                 // Map simplified output to expected format
                 const result = mapSimplePipelineOutput(pythonResult);
@@ -415,58 +437,23 @@ async function processBatchWithPython(parcelId) {
 
 // Map simplified pipeline output to frontend format
 function mapSimplePipelineOutput(pythonResult) {
-    const confidence = pythonResult.confidence || 0.5;
-    const damagePercent = pythonResult.damage_percentage || 0;
-    const claimDecision = pythonResult.claim_decision || 'MANUAL_REVIEW';
+    // The Python output is now already formatted for the frontend!
+    // We just need to wrap it with claim metadata
 
     return {
         claim_id: `CLM_${Date.now()}`,
         processing_timestamp: pythonResult.timestamp || new Date().toISOString(),
 
-        // PRIMARY OUTPUT FROM PKL MODEL
-        damage_type: pythonResult.damage_type || 'Unknown',
-        damage_type_code: pythonResult.damage_type_code || 'other',
-        damage_percentage: damagePercent,
-        damaged_area_m2: pythonResult.damaged_area_m2 || 0,
-        damaged_area_acres: pythonResult.damaged_area_acres || 0,
+        ...pythonResult, // Spread the rich structure from Python
 
-        overall_assessment: {
-            final_decision: claimDecision,
-            confidence_score: confidence,
-            risk_level: confidence >= 0.7 ? 'low' : confidence >= 0.3 ? 'medium' : 'high',
-            manual_review_required: claimDecision === 'MANUAL_REVIEW'
-        },
-
-        damage_assessment: {
-            ai_calculated_damage_percent: damagePercent,
-            farmer_claimed_damage_percent: 50.0,
-            final_damage_percent: damagePercent,
-            severity: damagePercent > 60 ? 'critical' : damagePercent > 35 ? 'severe' : damagePercent > 15 ? 'moderate' : 'minimal',
-            damage_type: pythonResult.damage_type || 'Unknown'
-        },
-
-        payout_calculation: pythonResult.payout_calculation || {
-            sum_insured: 100000,
-            damage_percent: damagePercent,
-            payout_amount: claimDecision === 'APPROVE' ? (damagePercent / 100) * 100000 : 0,
-            currency: 'INR'
-        },
-
+        // Ensure backward compatibility if frontend checks specific fields
         verification_evidence: {
-            authenticity_verified: confidence >= 0.5,
-            location_verified: true,
-            processing_note: pythonResult.decision_reason || 'Processed by simplified pipeline'
-        },
-
-        area_info: {
-            total_field_area_m2: pythonResult.total_field_area_m2 || 0,
-            damaged_area_m2: pythonResult.damaged_area_m2 || 0,
-            damaged_area_acres: pythonResult.damaged_area_acres || 0,
-            estimation_method: pythonResult.area_estimation_method || 'ESTIMATED'
-        },
-
-        images_processed: pythonResult.images_processed || 0,
-        image_details: pythonResult.image_details || []
+            authenticity_verified: pythonResult.verification_results?.exif?.score > 0.5,
+            location_verified: pythonResult.verification_results?.geolocation?.status === 'PASS',
+            weather_verified: pythonResult.verification_results?.weather?.status === 'MATCH',
+            processing_note: pythonResult.overall_assessment?.decision_reason || 'Processed by enhanced pipeline',
+            details: pythonResult.verification_results // Include full details
+        }
     };
 }
 
