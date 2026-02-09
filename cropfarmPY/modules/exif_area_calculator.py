@@ -13,6 +13,7 @@ Usage:
 """
 
 import os
+import sys
 import math
 from typing import Dict, Optional, Tuple, List
 from PIL import Image
@@ -351,4 +352,4 @@ if __name__ == "__main__":
     coverage = calc.calculate_ground_coverage(altitude_m=50, fov_degrees=60)
     print(f"\nAt 50m altitude with 60° FOV: {coverage:.2f} m² coverage")
     
-    print("\n✓ Calculator ready for production use!")
+    print("\n[OK] Calculator ready for production use!", file=sys.stderr)

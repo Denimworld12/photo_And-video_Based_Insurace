@@ -7,12 +7,9 @@ Uses config.pkl for model configuration.
 
 Output Format:
 {
-    "damage_type": "Weed Damage",
-    "damage_percentage": 34.5,
-    "damaged_area_m2": 517.5,
-    "damaged_area_acres": 0.128,
-    "confidence": 0.82,
-    "claim_decision": "APPROVE"
+    "damage_assessment": { ... },
+    "verification_results": { ... },
+    "final_decision": { ... }
 }
 """
 
@@ -28,6 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import cv2
+
+# Import Verifiers
+from modules.weather_verifier import WeatherVerifier
+from modules.geolocation_verifier import GeolocationVerifier
+from modules.fraud_detector import FraudDetector
 
 # Load config from pkl
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.pkl')
@@ -116,7 +118,7 @@ def analyze_damage_rgb(image_path: str) -> Dict:
 
 
 # ============================================================================
-# EXIF AREA CALCULATOR
+# EXIF COORDINATE EXTRACTOR
 # ============================================================================
 def get_exif_coordinates(image_path: str) -> Optional[Dict]:
     """Extract GPS coordinates from EXIF data"""
@@ -158,42 +160,17 @@ def get_exif_coordinates(image_path: str) -> Optional[Dict]:
     except Exception as e:
         return None
 
-
-def calculate_area_from_coordinates(coordinates: List[Dict]) -> float:
-    """
-    Calculate area from GPS coordinates using Shoelace formula.
-    Returns area in square meters.
-    """
-    if len(coordinates) < 3:
-        return 0.0
-    
+def get_exif_timestamp(image_path: str) -> Optional[str]:
+    """Extract timestamp from EXIF"""
     try:
-        from math import radians, cos, sqrt
-        
-        # Convert to local coordinate system
-        avg_lat = sum(c['lat'] for c in coordinates) / len(coordinates)
-        m_per_deg_lat = 111320
-        m_per_deg_lon = m_per_deg_lat * cos(radians(avg_lat))
-        
-        # Convert to meters
-        points = []
-        for c in coordinates:
-            x = (c['lon'] - coordinates[0]['lon']) * m_per_deg_lon
-            y = (c['lat'] - coordinates[0]['lat']) * m_per_deg_lat
-            points.append((x, y))
-        
-        # Shoelace formula
-        n = len(points)
-        area = 0.0
-        for i in range(n):
-            j = (i + 1) % n
-            area += points[i][0] * points[j][1]
-            area -= points[j][0] * points[i][1]
-        
-        return abs(area) / 2.0
-    
-    except Exception:
-        return 0.0
+        from PIL import Image
+        img = Image.open(image_path)
+        exif = img._getexif()
+        if exif:
+            return exif.get(36867) # DateTimeOriginal
+    except:
+        pass
+    return None
 
 
 # ============================================================================
@@ -201,30 +178,29 @@ def calculate_area_from_coordinates(coordinates: List[Dict]) -> float:
 # ============================================================================
 def assess_crop_damage(
     image_paths: List[str],
+    user_coords: Optional[Dict] = None,
     field_size_m2: Optional[float] = None,
     farmer_claimed_damage: float = 50.0,
-    sum_insured: float = 100000.0
+    sum_insured: float = 100000.0,
+    api_key: Optional[str] = None
 ) -> Dict:
     """
-    🔥 MAIN FUNCTION - Assess crop damage from images.
-    
-    Args:
-        image_paths: List of image file paths
-        field_size_m2: Optional known field size in m²
-        farmer_claimed_damage: Damage % claimed by farmer
-        sum_insured: Insurance sum insured amount
-    
-    Returns:
-        Complete assessment result
+    🔥 MAIN FUNCTION - Assess crop damage with Multi-Stage Verification.
     """
     if not image_paths:
         return {'error': 'No images provided'}
     
-    # Analyze each image
+    # Initialize Verifiers
+    weather_verifier = WeatherVerifier(api_key)
+    geo_verifier = GeolocationVerifier()
+    fraud_detector = FraudDetector()
+
+    # 1. Analyze Images & Extract Metadata
     results = []
     coordinates = []
     damage_percentages = []
     damage_types = []
+    image_details_for_fraud = []
     
     for path in image_paths:
         if not os.path.exists(path):
@@ -237,145 +213,196 @@ def assess_crop_damage(
             damage_percentages.append(analysis['damage_percentage'])
             damage_types.append(analysis['damage_type_code'])
         
-        # Extract coordinates
+        # Extract metadata
         coords = get_exif_coordinates(path)
         if coords:
             coordinates.append(coords)
+            
+        ts = get_exif_timestamp(path)
+        image_details_for_fraud.append({
+            'filename': os.path.basename(path),
+            'exif_timestamp': ts,
+            'software': '' # Can extract software tag if needed
+        })
     
     if not results:
         return {'error': 'No valid images could be processed'}
+
+    # 2. Geolocation Verification
+    geo_result = geo_verifier.analyze_coordinate_cluster(coordinates)
     
-    # Calculate average damage
+    # 3. Damage Assessment
     avg_damage = np.mean(damage_percentages)
-    
-    # Get consensus damage type
     from collections import Counter
     damage_type_code = Counter(damage_types).most_common(1)[0][0]
     damage_type_name = CONFIG.get('DAMAGE_NAMES', {}).get(damage_type_code, 'Unknown')
     
-    # Calculate area
+    # 4. Weather Verification
+    # Use center of image coordinates or user coordinates
+    target_coords = geo_result.get('center')
+    if not target_coords and user_coords:
+        target_coords = user_coords
+    
+    weather_result = {'status': 'SKIPPED', 'score': 0.5, 'details': ['No coordinates']}
+    if target_coords:
+        weather_data = weather_verifier.fetch_weather_data(target_coords['lat'], target_coords['lon'])
+        weather_result = weather_verifier.verify_damage_correlation(weather_data, damage_type_code)
+
+    # 5. Fraud Detection
+    # TODO: Pass Exif software data
+    exif_fraud_result = fraud_detector.verify_exif_timestamps(image_details_for_fraud, datetime.now())
+    
+    # 6. Final Fraud Risk Calculation
+    fraud_risk = fraud_detector.calculate_fraud_risk(
+        weather_score=weather_result.get('confidence_score', 0.5),
+        geolocation_score=geo_result.get('score', 0.5),
+        exif_score=exif_fraud_result.get('score', 0.5),
+        tampering_score=1.0 # Placeholder
+    )
+
+    # 7. Area Calculation
     if field_size_m2:
         total_area = field_size_m2
         area_method = 'MANUAL'
-    elif len(coordinates) >= 3:
-        total_area = calculate_area_from_coordinates(coordinates)
-        area_method = 'EXIF_GPS'
+    elif geo_result.get('max_spread_km', 0) > 0.05: # Use coordinate spread if significant
+        # Simplified: area of bounding box of coordinates
+        # Taking max spread as diagonal of a square
+        spread_m = geo_result['max_spread_km'] * 1000
+        total_area = (spread_m * spread_m) / 2 # Very rough estimate
+        area_method = 'GPS_SPREAD' 
     else:
         # Estimate from image count
         total_area = len(results) * CONFIG.get('DEFAULT_IMAGE_COVERAGE_M2', 1500.0)
         area_method = 'ESTIMATED'
     
     damaged_area_m2 = total_area * (avg_damage / 100)
-    damaged_area_acres = damaged_area_m2 / 4046.86
     
-    # Calculate confidence
-    variance = np.std(damage_percentages) if len(damage_percentages) > 1 else 0
-    confidence = max(0.3, min(0.95, 1.0 - (variance / 50)))
-    
-    # Calculate payout
-    payout_amount = (avg_damage / 100) * sum_insured
-    
-    # Make decision
-    if confidence >= 0.70:
+    # 8. Final Decision Logic
+    verified_confidence = (
+        (geo_result.get('score', 0.5) * 0.4) +
+        (weather_result.get('confidence_score', 0.5) * 0.4) +
+        (1.0 - fraud_risk.get('risk_score', 0.5)) * 0.2
+    )
+
+    if fraud_risk.get('auto_reject'):
+        claim_decision = 'REJECT'
+        decision_reason = f"High Fraud Risk ({fraud_risk['risk_score']}) - Auto Rejected"
+    elif verified_confidence >= 0.75:
         claim_decision = 'APPROVE'
-        decision_reason = f'High confidence ({confidence:.1%}) - Claim approved'
-    elif confidence >= 0.30:
+        decision_reason = f"High Verification Score ({verified_confidence:.2f}) - Approved"
+    elif verified_confidence >= 0.40:
         claim_decision = 'MANUAL_REVIEW'
-        decision_reason = f'Moderate confidence ({confidence:.1%}) - Requires manual review'
+        decision_reason = f"Moderate Verification Score ({verified_confidence:.2f}) - Manual Review Required"
     else:
         claim_decision = 'REJECT'
-        decision_reason = f'Low confidence ({confidence:.1%}) - Insufficient evidence'
-    
+        decision_reason = f"Low Verification Score ({verified_confidence:.2f}) - Rejected"
+
+    payout = (avg_damage / 100) * sum_insured if claim_decision == 'APPROVE' else 0
+
     return {
-        # PRIMARY OUTPUT
+        # CORE OUTPUT
         'damage_type': damage_type_name,
         'damage_type_code': damage_type_code,
         'damage_percentage': round(avg_damage, 1),
         'damaged_area_m2': round(damaged_area_m2, 1),
-        'damaged_area_acres': round(damaged_area_acres, 4),
+        
+        # VERIFICATION RESULTS
+        'verification_results': {
+            'geolocation': geo_result,
+            'weather': weather_result,
+            'fraud_risk': fraud_risk,
+            'exif': exif_fraud_result
+        },
         
         # DECISION
-        'confidence': round(confidence, 3),
-        'claim_decision': claim_decision,
-        'decision_reason': decision_reason,
+        'overall_assessment': {
+            'final_decision': claim_decision,
+            'confidence_score': round(verified_confidence, 2),
+            'risk_level': fraud_risk['risk_level'],
+            'manual_review_required': claim_decision == 'MANUAL_REVIEW',
+            'decision_reason': decision_reason
+        },
         
         # PAYOUT
         'payout_calculation': {
             'sum_insured': sum_insured,
             'damage_percent': round(avg_damage, 1),
-            'payout_amount': round(payout_amount, 2) if claim_decision == 'APPROVE' else 0,
+            'payout_amount': round(payout, 2),
             'currency': 'INR'
         },
         
         # METADATA
-        'area_estimation_method': area_method,
-        'total_field_area_m2': round(total_area, 1),
+        'area_info': {
+            'total_field_area_m2': round(total_area, 1),
+            'estimation_method': area_method
+        },
         'images_processed': len(results),
-        'timestamp': datetime.now().isoformat(),
-        
-        # PER-IMAGE DETAILS (optional)
-        'image_details': results
+        'timestamp': datetime.now().isoformat()
     }
 
 
 # ============================================================================
-# CLI INTERFACE (for backend server.js to call)
+# CLI INTERFACE
 # ============================================================================
 def main():
-    """
-    Command line interface for backend integration.
-    
-    Usage:
-        python main_pipeline.py <image1> <image2> ... [--field-size M2] [--sum-insured AMT] [--claimed-damage PCT]
-    
-    Example:
-        python main_pipeline.py img1.jpg img2.jpg img3.jpg --field-size 5000 --sum-insured 100000 --claimed-damage 50
-    """
     if len(sys.argv) < 2:
-        print(json.dumps({
-            'error': 'Usage: python main_pipeline.py <image1> <image2> ... [options]',
-            'options': {
-                '--field-size': 'Field size in m²',
-                '--sum-insured': 'Sum insured amount',
-                '--claimed-damage': 'Farmer claimed damage %'
-            }
-        }))
+        # Print usage to stderr so it doesn't parse as invalid JSON
+        print(json.dumps({'error': 'Usage: python main_pipeline.py <images> [options]'}), file=sys.stderr)
         sys.exit(1)
     
-    # Parse arguments
-    image_paths = []
-    field_size = None
-    sum_insured = 100000.0
-    claimed_damage = 50.0
-    
-    i = 1
-    while i < len(sys.argv):
-        arg = sys.argv[i]
+    try:
+        # Parse arguments
+        image_paths = []
+        field_size = None
+        sum_insured = 100000.0
+        claimed_damage = 50.0
+        user_lat = None
+        user_lon = None
+        api_key = None
         
-        if arg == '--field-size' and i + 1 < len(sys.argv):
-            field_size = float(sys.argv[i + 1])
-            i += 2
-        elif arg == '--sum-insured' and i + 1 < len(sys.argv):
-            sum_insured = float(sys.argv[i + 1])
-            i += 2
-        elif arg == '--claimed-damage' and i + 1 < len(sys.argv):
-            claimed_damage = float(sys.argv[i + 1])
-            i += 2
-        else:
-            image_paths.append(arg)
-            i += 1
-    
-    # Run assessment
-    result = assess_crop_damage(
-        image_paths=image_paths,
-        field_size_m2=field_size,
-        farmer_claimed_damage=claimed_damage,
-        sum_insured=sum_insured
-    )
-    
-    # Output JSON
-    print(json.dumps(result, indent=2))
-    sys.stdout.flush()
+        i = 1
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            
+            if arg == '--field-size' and i + 1 < len(sys.argv):
+                field_size = float(sys.argv[i + 1])
+                i += 2
+            elif arg == '--sum-insured' and i + 1 < len(sys.argv):
+                sum_insured = float(sys.argv[i + 1])
+                i += 2
+            elif arg == '--claimed-damage' and i + 1 < len(sys.argv):
+                claimed_damage = float(sys.argv[i + 1])
+                i += 2
+            elif arg == '--user-lat' and i + 1 < len(sys.argv):
+                user_lat = float(sys.argv[i + 1])
+                i += 2
+            elif arg == '--user-lon' and i + 1 < len(sys.argv):
+                user_lon = float(sys.argv[i + 1])
+                i += 2
+            elif arg == '--api-key' and i + 1 < len(sys.argv):
+                api_key = sys.argv[i + 1]
+                i += 2
+            else:
+                image_paths.append(arg)
+                i += 1
+        
+        user_coords = {'lat': user_lat, 'lon': user_lon} if user_lat is not None and user_lon is not None else None
+
+        result = assess_crop_damage(
+            image_paths=image_paths,
+            user_coords=user_coords,
+            field_size_m2=field_size,
+            farmer_claimed_damage=claimed_damage,
+            sum_insured=sum_insured,
+            api_key=api_key
+        )
+        
+        print(json.dumps(result, indent=2))
+        sys.stdout.flush()
+
+    except Exception as e:
+        print(json.dumps({'error': str(e)}), file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
