@@ -339,7 +339,7 @@ const ClaimResults = () => {
           )}
 
           {/* Verification */}
-          {verification && Object.keys(verification).length > 0 && (
+          {verification && (
             <div className="expandable-card">
               <div
                 className="card-header"
@@ -352,24 +352,59 @@ const ClaimResults = () => {
                   }
                 }}
               >
-                <h3>✓ Verification Status</h3>
+                <h3>🛡️ Verification Status</h3>
                 <span className="toggle-icon">{expandedSection === 'verification' ? '−' : '+'}</span>
               </div>
               {expandedSection === 'verification' && (
                 <div className="card-content">
-                  <div className="verification-list">
-                    <div className={`verification-item ${verification.authenticity_verified ? 'verified' : 'not-verified'}`}>
-                      <span className="check-icon">{verification.authenticity_verified ? '✓' : '✗'}</span>
-                      <span>Authenticity Verified</span>
+                  <div className="verification-grid">
+
+                    {/* Geolocation */}
+                    <div className={`verification-box ${verification.details?.geolocation?.status === 'PASS' ? 'pass' : 'fail'}`}>
+                      <h4>📍 Geolocation</h4>
+                      <div className="ver-status">
+                        {verification.details?.geolocation?.status === 'PASS' ? '✅ Verified' : '⚠️ Issue'}
+                      </div>
+                      <p className="ver-detail">
+                        {verification.details?.geolocation?.details?.[0] || 'Checking coordinate consistency...'}
+                      </p>
                     </div>
-                    <div className={`verification-item ${verification.location_verified ? 'verified' : 'not-verified'}`}>
-                      <span className="check-icon">{verification.location_verified ? '✓' : '✗'}</span>
-                      <span>Location Verified</span>
+
+                    {/* Weather */}
+                    <div className={`verification-box ${verification.details?.weather?.status === 'MATCH' ? 'pass' : verification.details?.weather?.status === 'MISMATCH' ? 'fail' : 'neutral'}`}>
+                      <h4>☁️ Weather Check</h4>
+                      <div className="ver-status">
+                        {verification.details?.weather?.status === 'MATCH' ? '✅ Consistent' : verification.details?.weather?.status === 'MISMATCH' ? '❌ Mismatch' : 'ℹ️ Skipped'}
+                      </div>
+                      <p className="ver-detail">
+                        {verification.details?.weather?.details?.[0] || 'validating weather conditions...'}
+                      </p>
                     </div>
+
+                    {/* Fraud Risk */}
+                    <div className={`verification-box ${verification.details?.fraud_risk?.risk_level === 'LOW' ? 'pass' : 'fail'}`}>
+                      <h4>🕵️ Fraud Risk</h4>
+                      <div className="ver-status">
+                        Risk Level: <strong>{verification.details?.fraud_risk?.risk_level || 'UNKNOWN'}</strong>
+                      </div>
+                      <p className="ver-detail">
+                        Score: {verification.details?.fraud_risk?.risk_score || 0} (Low is good)
+                      </p>
+                    </div>
+
+                    {/* EXIF */}
+                    <div className={`verification-box ${verification.authenticity_verified ? 'pass' : 'neutral'}`}>
+                      <h4>📷 Metadata</h4>
+                      <div className="ver-status">
+                        {verification.authenticity_verified ? '✅ Original' : '⚠️ Missing/Edited'}
+                      </div>
+                    </div>
+
                   </div>
+
                   {verification.processing_note && (
                     <div className="verification-note">
-                      <strong>Note:</strong> {verification.processing_note}
+                      <strong>System Note:</strong> {verification.processing_note}
                     </div>
                   )}
                 </div>
