@@ -237,6 +237,22 @@ def assess_crop_damage(
     damage_type_code = Counter(damage_types).most_common(1)[0][0]
     damage_type_name = CONFIG.get('DAMAGE_NAMES', {}).get(damage_type_code, 'Unknown')
     
+    # 3b. Severity Classification (cv_pbi tiers)
+    if avg_damage <= 33:
+        damage_severity = 'Minor'
+        severity_range = '0-33%'
+        severity_description = 'Minor crop losses detected'
+    elif avg_damage <= 66:
+        damage_severity = 'Moderate'
+        severity_range = '33-66%'
+        severity_description = 'Moderate crop losses detected'
+    else:
+        damage_severity = 'High'
+        severity_range = '66-100%'
+        severity_description = 'Severe/total crop losses detected'
+    
+    print(f"[DAMAGE] Avg damage: {avg_damage:.1f}% → Severity: {damage_severity} ({severity_range})", file=sys.stderr)
+    
     # 4. Weather Verification
     # Use center of image coordinates or user coordinates
     target_coords = geo_result.get('center')
@@ -249,16 +265,29 @@ def assess_crop_damage(
         weather_result = weather_verifier.verify_damage_correlation(weather_data, damage_type_code)
 
     # 5. Fraud Detection
-    # TODO: Pass Exif software data
+    # 5a. EXIF timestamp verification
     exif_fraud_result = fraud_detector.verify_exif_timestamps(image_details_for_fraud, datetime.now())
     
-    # 6. Final Fraud Risk Calculation
+    # 5b. DUPLICATE IMAGE DETECTION (NEW)
+    duplicate_result = fraud_detector.detect_duplicate_images(image_paths)
+    print(f"[FRAUD] Duplicate check: {duplicate_result['exact_duplicate_count']} exact, "
+          f"{duplicate_result['near_duplicate_count']} near-duplicates, "
+          f"score={duplicate_result['score']}", file=sys.stderr)
+    for detail in duplicate_result.get('details', []):
+        print(f"[FRAUD]   {detail}", file=sys.stderr)
+    
+    # 6. Final Fraud Risk Calculation (now includes duplicate_score)
     fraud_risk = fraud_detector.calculate_fraud_risk(
         weather_score=weather_result.get('confidence_score', 0.5),
         geolocation_score=geo_result.get('score', 0.5),
         exif_score=exif_fraud_result.get('score', 0.5),
-        tampering_score=1.0 # Placeholder
+        tampering_score=1.0, # Placeholder
+        duplicate_score=duplicate_result.get('score', 1.0)
     )
+    
+    print(f"[FRAUD] Final risk: score={fraud_risk['risk_score']}, "
+          f"level={fraud_risk['risk_level']}, "
+          f"auto_reject={fraud_risk['auto_reject']}", file=sys.stderr)
 
     # 7. Area Calculation
     if field_size_m2:
@@ -271,11 +300,14 @@ def assess_crop_damage(
         total_area = (spread_m * spread_m) / 2 # Very rough estimate
         area_method = 'GPS_SPREAD' 
     else:
-        # Estimate from image count
-        total_area = len(results) * CONFIG.get('DEFAULT_IMAGE_COVERAGE_M2', 1500.0)
+        # Estimate from image count (use effective unique images if duplicates found)
+        effective_images = duplicate_result.get('effective_unique_images', len(results))
+        total_area = effective_images * CONFIG.get('DEFAULT_IMAGE_COVERAGE_M2', 1500.0)
         area_method = 'ESTIMATED'
     
     damaged_area_m2 = total_area * (avg_damage / 100)
+    damaged_area_acres = round(damaged_area_m2 / 4046.86, 2)
+    total_area_acres = round(total_area / 4046.86, 2)
     
     # 8. Final Decision Logic
     verified_confidence = (
@@ -287,6 +319,12 @@ def assess_crop_damage(
     if fraud_risk.get('auto_reject'):
         claim_decision = 'REJECT'
         decision_reason = f"High Fraud Risk ({fraud_risk['risk_score']}) - Auto Rejected"
+    elif duplicate_result.get('exact_duplicate_count', 0) > 0 and fraud_risk['risk_level'] == 'HIGH':
+        claim_decision = 'REJECT'
+        decision_reason = f"Duplicate images detected ({duplicate_result['exact_duplicate_count']} duplicates) - High Fraud Risk"
+    elif duplicate_result.get('exact_duplicate_count', 0) > 0:
+        claim_decision = 'MANUAL_REVIEW'
+        decision_reason = f"Duplicate images detected ({duplicate_result['exact_duplicate_count']} duplicates) - Requires Manual Review"
     elif verified_confidence >= 0.75:
         claim_decision = 'APPROVE'
         decision_reason = f"High Verification Score ({verified_confidence:.2f}) - Approved"
@@ -304,14 +342,26 @@ def assess_crop_damage(
         'damage_type': damage_type_name,
         'damage_type_code': damage_type_code,
         'damage_percentage': round(avg_damage, 1),
+        'damage_severity': damage_severity,
+        'severity_range': severity_range,
+        'severity_description': severity_description,
         'damaged_area_m2': round(damaged_area_m2, 1),
+        'damaged_area_acres': damaged_area_acres,
         
         # VERIFICATION RESULTS
         'verification_results': {
             'geolocation': geo_result,
             'weather': weather_result,
             'fraud_risk': fraud_risk,
-            'exif': exif_fraud_result
+            'exif': exif_fraud_result,
+            'duplicate_detection': {
+                'score': duplicate_result['score'],
+                'exact_duplicate_count': duplicate_result['exact_duplicate_count'],
+                'near_duplicate_count': duplicate_result['near_duplicate_count'],
+                'effective_unique_images': duplicate_result['effective_unique_images'],
+                'total_images': duplicate_result['total_images'],
+                'details': duplicate_result['details']
+            }
         },
         
         # DECISION
@@ -334,6 +384,7 @@ def assess_crop_damage(
         # METADATA
         'area_info': {
             'total_field_area_m2': round(total_area, 1),
+            'total_field_area_acres': total_area_acres,
             'estimation_method': area_method
         },
         'images_processed': len(results),

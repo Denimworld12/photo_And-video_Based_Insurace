@@ -92,23 +92,42 @@ const ClaimResults = () => {
   const damagePercent = result.damage_percentage || 0;
   const damagedAreaM2 = result.damaged_area_m2 || 0;
   const damagedAreaAcres = result.damaged_area_acres || 0;
+  const damageSeverity = result.damage_severity || 'Unknown';
+  const severityRange = result.severity_range || '';
+  const severityDescription = result.severity_description || '';
   const payout = result.payout_calculation || {};
   const verification = result.verification_evidence || {};
   const areaInfo = result.area_info || {};
   const imagesProcessed = result.images_processed || 0;
   const imageDetails = result.image_details || [];
-  const totalFieldAreaM2 = result.total_field_area_m2 || areaInfo.total_field_area_m2 || 0;
-  const areaEstimationMethod = result.area_estimation_method || areaInfo.estimation_method || 'ESTIMATED';
+  const totalFieldAreaM2 = areaInfo.total_field_area_m2 || 0;
+  const totalFieldAreaAcres = areaInfo.total_field_area_acres || 0;
+  const areaEstimationMethod = areaInfo.estimation_method || 'ESTIMATED';
+
+  // Duplicate detection data
+  const duplicateDetected = verification.duplicate_detected || false;
+  const duplicateCount = verification.duplicate_count || 0;
+  const nearDuplicateCount = verification.near_duplicate_count || 0;
+  const effectiveUniqueImages = verification.effective_unique_images || imagesProcessed;
+  const duplicateDetails = verification.duplicate_details || [];
+
+  // Fraud risk data
+  const fraudRiskLevel = verification.fraud_risk_level || 'UNKNOWN';
+  const fraudRiskScore = verification.fraud_risk_score || 0;
+  const fraudFactors = verification.fraud_factors || {};
 
   console.log('📊 FRONTEND - Extracted values:');
   console.log(`   - damageType: ${damageType}`);
   console.log(`   - damagePercent: ${damagePercent}`);
+  console.log(`   - damageSeverity: ${damageSeverity} (${severityRange})`);
   console.log(`   - damagedAreaM2: ${damagedAreaM2}`);
   console.log(`   - damagedAreaAcres: ${damagedAreaAcres}`);
   console.log(`   - totalFieldAreaM2: ${totalFieldAreaM2}`);
   console.log(`   - imagesProcessed: ${imagesProcessed}`);
   console.log(`   - confidence: ${confidence}`);
   console.log(`   - decision: ${decision.final_decision}`);
+  console.log(`   - duplicateDetected: ${duplicateDetected} (${duplicateCount} exact, ${nearDuplicateCount} near)`);
+  console.log(`   - fraudRiskLevel: ${fraudRiskLevel} (${fraudRiskScore})`);
 
   const getStatusClass = (status) => {
     const statusMap = {
@@ -132,11 +151,13 @@ const ClaimResults = () => {
     return icons[decision] || '❓';
   };
 
-  const getSeverityFromPercent = (percent) => {
-    if (percent > 60) return 'critical';
-    if (percent > 35) return 'severe';
-    if (percent > 15) return 'moderate';
-    return 'minimal';
+  const getSeverityClass = (severity) => {
+    const map = {
+      'Minor': 'minor',
+      'Moderate': 'moderate',
+      'High': 'high'
+    };
+    return map[severity] || 'moderate';
   };
 
   return (
@@ -189,6 +210,17 @@ const ClaimResults = () => {
           </div>
         </div>
 
+        {/* Duplicate Warning Banner */}
+        {duplicateDetected && (
+          <div className="duplicate-warning-banner">
+            <div className="warning-icon">⚠️</div>
+            <div className="warning-content">
+              <strong>Duplicate Images Detected</strong>
+              <p>{duplicateCount} duplicate image{duplicateCount > 1 ? 's' : ''} found{nearDuplicateCount > 0 ? `, ${nearDuplicateCount} near-duplicate${nearDuplicateCount > 1 ? 's' : ''}` : ''}. Only {effectiveUniqueImages} unique image{effectiveUniqueImages > 1 ? 's' : ''} out of {imagesProcessed} submitted.</p>
+            </div>
+          </div>
+        )}
+
         {/* Primary Damage Info Card */}
         <div className="damage-overview-card">
           <h3>🌾 Damage Assessment</h3>
@@ -201,18 +233,29 @@ const ClaimResults = () => {
             <div className="damage-stat">
               <span className="stat-label">Damage Percentage</span>
               <span className="stat-value highlight">{damagePercent.toFixed(1)}%</span>
-              <span className={`severity-badge ${getSeverityFromPercent(damagePercent)}`}>
-                {getSeverityFromPercent(damagePercent).toUpperCase()}
+              <span className={`severity-badge ${getSeverityClass(damageSeverity)}`}>
+                {damageSeverity.toUpperCase()} ({severityRange})
               </span>
             </div>
             <div className="damage-stat">
+              <span className="stat-label">Severity</span>
+              <span className="stat-value">{damageSeverity}</span>
+              <span className="stat-sub">{severityDescription}</span>
+            </div>
+            <div className="damage-stat">
               <span className="stat-label">Damaged Area</span>
-              <span className="stat-value">{damagedAreaM2.toFixed(1)} m²</span>
-              <span className="stat-sub">{damagedAreaAcres.toFixed(4)} acres</span>
+              <span className="stat-value">{damagedAreaAcres} acres</span>
+              <span className="stat-sub">{damagedAreaM2.toFixed(1)} m²</span>
+            </div>
+            <div className="damage-stat">
+              <span className="stat-label">Total Field Area</span>
+              <span className="stat-value">{totalFieldAreaAcres} acres</span>
+              <span className="stat-sub">{totalFieldAreaM2.toFixed(1)} m²</span>
             </div>
             <div className="damage-stat">
               <span className="stat-label">Images Analyzed</span>
-              <span className="stat-value">{imagesProcessed}</span>
+              <span className="stat-value">{effectiveUniqueImages}/{imagesProcessed}</span>
+              <span className="stat-sub">{effectiveUniqueImages} unique</span>
             </div>
           </div>
         </div>
@@ -271,15 +314,19 @@ const ClaimResults = () => {
                 <div className="area-grid">
                   <div className="area-item">
                     <span className="area-label">Total Field Area</span>
-                    <span className="area-value">{totalFieldAreaM2.toFixed(1)} m²</span>
+                    <span className="area-value">{totalFieldAreaAcres} acres</span>
+                    <span className="area-sub">{totalFieldAreaM2.toFixed(1)} m²</span>
                   </div>
                   <div className="area-item">
                     <span className="area-label">Damaged Area</span>
-                    <span className="area-value">{damagedAreaM2.toFixed(1)} m²</span>
+                    <span className="area-value">{damagedAreaAcres} acres</span>
+                    <span className="area-sub">{damagedAreaM2.toFixed(1)} m²</span>
                   </div>
                   <div className="area-item">
-                    <span className="area-label">Damaged Area (Acres)</span>
-                    <span className="area-value">{damagedAreaAcres.toFixed(4)} acres</span>
+                    <span className="area-label">Damage Severity</span>
+                    <span className={`area-value severity-text ${getSeverityClass(damageSeverity)}`}>
+                      {damageSeverity} ({severityRange})
+                    </span>
                   </div>
                   <div className="area-item">
                     <span className="area-label">Estimation Method</span>
@@ -339,78 +386,123 @@ const ClaimResults = () => {
           )}
 
           {/* Verification */}
-          {verification && (
-            <div className="expandable-card">
-              <div
-                className="card-header"
-                onClick={() => toggleSection('verification')}
-                role="button"
-                tabIndex={0}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    toggleSection('verification');
-                  }
-                }}
-              >
-                <h3>🛡️ Verification Status</h3>
-                <span className="toggle-icon">{expandedSection === 'verification' ? '−' : '+'}</span>
-              </div>
-              {expandedSection === 'verification' && (
-                <div className="card-content">
-                  <div className="verification-grid">
+          <div className="expandable-card">
+            <div
+              className="card-header"
+              onClick={() => toggleSection('verification')}
+              role="button"
+              tabIndex={0}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  toggleSection('verification');
+                }
+              }}
+            >
+              <h3>🛡️ Verification & Fraud Analysis</h3>
+              <span className="toggle-icon">{expandedSection === 'verification' ? '−' : '+'}</span>
+            </div>
+            {expandedSection === 'verification' && (
+              <div className="card-content">
+                <div className="verification-grid">
 
-                    {/* Geolocation */}
-                    <div className={`verification-box ${verification.details?.geolocation?.status === 'PASS' ? 'pass' : 'fail'}`}>
-                      <h4>📍 Geolocation</h4>
-                      <div className="ver-status">
-                        {verification.details?.geolocation?.status === 'PASS' ? '✅ Verified' : '⚠️ Issue'}
-                      </div>
-                      <p className="ver-detail">
-                        {verification.details?.geolocation?.details?.[0] || 'Checking coordinate consistency...'}
-                      </p>
+                  {/* Geolocation */}
+                  <div className={`verification-box ${verification.details?.geolocation?.status === 'PASS' ? 'pass' : 'fail'}`}>
+                    <h4>📍 Geolocation</h4>
+                    <div className="ver-status">
+                      {verification.details?.geolocation?.status === 'PASS' ? '✅ Verified' : '⚠️ Issue'}
                     </div>
-
-                    {/* Weather */}
-                    <div className={`verification-box ${verification.details?.weather?.status === 'MATCH' ? 'pass' : verification.details?.weather?.status === 'MISMATCH' ? 'fail' : 'neutral'}`}>
-                      <h4>☁️ Weather Check</h4>
-                      <div className="ver-status">
-                        {verification.details?.weather?.status === 'MATCH' ? '✅ Consistent' : verification.details?.weather?.status === 'MISMATCH' ? '❌ Mismatch' : 'ℹ️ Skipped'}
-                      </div>
-                      <p className="ver-detail">
-                        {verification.details?.weather?.details?.[0] || 'validating weather conditions...'}
-                      </p>
-                    </div>
-
-                    {/* Fraud Risk */}
-                    <div className={`verification-box ${verification.details?.fraud_risk?.risk_level === 'LOW' ? 'pass' : 'fail'}`}>
-                      <h4>🕵️ Fraud Risk</h4>
-                      <div className="ver-status">
-                        Risk Level: <strong>{verification.details?.fraud_risk?.risk_level || 'UNKNOWN'}</strong>
-                      </div>
-                      <p className="ver-detail">
-                        Score: {verification.details?.fraud_risk?.risk_score || 0} (Low is good)
-                      </p>
-                    </div>
-
-                    {/* EXIF */}
-                    <div className={`verification-box ${verification.authenticity_verified ? 'pass' : 'neutral'}`}>
-                      <h4>📷 Metadata</h4>
-                      <div className="ver-status">
-                        {verification.authenticity_verified ? '✅ Original' : '⚠️ Missing/Edited'}
-                      </div>
-                    </div>
-
+                    <p className="ver-detail">
+                      {verification.details?.geolocation?.details?.[0] || 'Checking coordinate consistency...'}
+                    </p>
                   </div>
 
-                  {verification.processing_note && (
-                    <div className="verification-note">
-                      <strong>System Note:</strong> {verification.processing_note}
+                  {/* Weather */}
+                  <div className={`verification-box ${verification.details?.weather?.status === 'MATCH' ? 'pass' : verification.details?.weather?.status === 'MISMATCH' ? 'fail' : 'neutral'}`}>
+                    <h4>☁️ Weather Check</h4>
+                    <div className="ver-status">
+                      {verification.details?.weather?.status === 'MATCH' ? '✅ Consistent' : verification.details?.weather?.status === 'MISMATCH' ? '❌ Mismatch' : 'ℹ️ Skipped'}
                     </div>
-                  )}
+                    <p className="ver-detail">
+                      {verification.details?.weather?.details?.[0] || 'Validating weather conditions...'}
+                    </p>
+                  </div>
+
+                  {/* Fraud Risk */}
+                  <div className={`verification-box ${fraudRiskLevel === 'LOW' ? 'pass' : fraudRiskLevel === 'HIGH' ? 'fail' : 'warning-box'}`}>
+                    <h4>🕵️ Fraud Risk</h4>
+                    <div className="ver-status">
+                      Risk Level: <strong className={`risk-${fraudRiskLevel.toLowerCase()}`}>{fraudRiskLevel}</strong>
+                    </div>
+                    <p className="ver-detail">
+                      Score: {(fraudRiskScore * 100).toFixed(0)}%
+                    </p>
+                    {Object.keys(fraudFactors).length > 0 && (
+                      <div className="fraud-factors">
+                        {fraudFactors.duplicate_risk > 0 && (
+                          <div className="factor-item">
+                            <span>Duplicate Risk</span>
+                            <span className={fraudFactors.duplicate_risk > 0.5 ? 'factor-high' : 'factor-low'}>
+                              {(fraudFactors.duplicate_risk * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
+                        {fraudFactors.geolocation_risk > 0 && (
+                          <div className="factor-item">
+                            <span>Geo Risk</span>
+                            <span className={fraudFactors.geolocation_risk > 0.5 ? 'factor-high' : 'factor-low'}>
+                              {(fraudFactors.geolocation_risk * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
+                        {fraudFactors.weather_risk > 0 && (
+                          <div className="factor-item">
+                            <span>Weather Risk</span>
+                            <span className={fraudFactors.weather_risk > 0.5 ? 'factor-high' : 'factor-low'}>
+                              {(fraudFactors.weather_risk * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Duplicate Detection */}
+                  <div className={`verification-box ${!duplicateDetected ? 'pass' : 'fail'}`}>
+                    <h4>🔄 Duplicate Check</h4>
+                    <div className="ver-status">
+                      {!duplicateDetected ? '✅ All Unique' : `❌ ${duplicateCount} Duplicate${duplicateCount > 1 ? 's' : ''} Found`}
+                    </div>
+                    <p className="ver-detail">
+                      {effectiveUniqueImages}/{imagesProcessed} unique images
+                      {nearDuplicateCount > 0 ? `, ${nearDuplicateCount} near-duplicate${nearDuplicateCount > 1 ? 's' : ''}` : ''}
+                    </p>
+                    {duplicateDetected && duplicateDetails.length > 0 && (
+                      <div className="duplicate-details-list">
+                        {duplicateDetails.slice(0, 5).map((detail, idx) => (
+                          <p key={idx} className="ver-detail duplicate-detail-item">{detail}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* EXIF */}
+                  <div className={`verification-box ${verification.authenticity_verified ? 'pass' : 'neutral'}`}>
+                    <h4>📷 Metadata</h4>
+                    <div className="ver-status">
+                      {verification.authenticity_verified ? '✅ Original' : '⚠️ Missing/Edited'}
+                    </div>
+                  </div>
+
                 </div>
-              )}
-            </div>
-          )}
+
+                {verification.processing_note && (
+                  <div className="verification-note">
+                    <strong>Decision:</strong> {verification.processing_note}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="action-buttons">

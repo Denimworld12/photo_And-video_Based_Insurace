@@ -438,7 +438,10 @@ async function processBatchWithPython(parcelId) {
 // Map simplified pipeline output to frontend format
 function mapSimplePipelineOutput(pythonResult) {
     // The Python output is now already formatted for the frontend!
-    // We just need to wrap it with claim metadata
+    // We just need to wrap it with claim metadata and ensure backward compatibility
+
+    const verResults = pythonResult.verification_results || {};
+    const dupDetection = verResults.duplicate_detection || {};
 
     return {
         claim_id: `CLM_${Date.now()}`,
@@ -446,13 +449,25 @@ function mapSimplePipelineOutput(pythonResult) {
 
         ...pythonResult, // Spread the rich structure from Python
 
-        // Ensure backward compatibility if frontend checks specific fields
+        // Ensure backward compatibility - frontend reads verification_evidence
         verification_evidence: {
-            authenticity_verified: pythonResult.verification_results?.exif?.score > 0.5,
-            location_verified: pythonResult.verification_results?.geolocation?.status === 'PASS',
-            weather_verified: pythonResult.verification_results?.weather?.status === 'MATCH',
+            authenticity_verified: verResults.exif?.score > 0.5,
+            location_verified: verResults.geolocation?.status === 'PASS',
+            weather_verified: verResults.weather?.status === 'MATCH',
             processing_note: pythonResult.overall_assessment?.decision_reason || 'Processed by enhanced pipeline',
-            details: pythonResult.verification_results // Include full details
+            details: verResults, // Include full verification details
+
+            // Duplicate detection summary for frontend
+            duplicate_detected: (dupDetection.exact_duplicate_count || 0) > 0,
+            duplicate_count: dupDetection.exact_duplicate_count || 0,
+            near_duplicate_count: dupDetection.near_duplicate_count || 0,
+            effective_unique_images: dupDetection.effective_unique_images || pythonResult.images_processed || 0,
+            duplicate_details: dupDetection.details || [],
+
+            // Fraud risk summary
+            fraud_risk_level: verResults.fraud_risk?.risk_level || 'UNKNOWN',
+            fraud_risk_score: verResults.fraud_risk?.risk_score || 0,
+            fraud_factors: verResults.fraud_risk?.factors || {}
         }
     };
 }
@@ -868,12 +883,25 @@ app.get('/api/claims/results/:documentId', (req, res) => {
         console.log('📊 RESULTS - Returning data:');
         console.log(`   - damage_type: ${claimData.processing_result?.damage_type}`);
         console.log(`   - damage_percentage: ${claimData.processing_result?.damage_percentage}`);
+        console.log(`   - damage_severity: ${claimData.processing_result?.damage_severity}`);
         console.log(`   - damaged_area_m2: ${claimData.processing_result?.damaged_area_m2}`);
         console.log(`   - damaged_area_acres: ${claimData.processing_result?.damaged_area_acres}`);
         console.log(`   - total_field_area_m2: ${claimData.processing_result?.area_info?.total_field_area_m2 || claimData.processing_result?.total_field_area_m2}`);
         console.log(`   - images_processed: ${claimData.processing_result?.images_processed}`);
         console.log(`   - confidence: ${claimData.processing_result?.overall_assessment?.confidence_score}`);
         console.log(`   - claim_decision: ${claimData.processing_result?.overall_assessment?.final_decision}`);
+
+        // DEBUG: Fraud & Duplicate data paths
+        const ve = claimData.processing_result?.verification_evidence;
+        const vr = claimData.processing_result?.verification_results;
+        console.log(`   📛 verification_evidence exists: ${!!ve}`);
+        console.log(`   📛 ve.fraud_risk_level: ${ve?.fraud_risk_level}`);
+        console.log(`   📛 ve.fraud_risk_score: ${ve?.fraud_risk_score}`);
+        console.log(`   📛 ve.duplicate_detected: ${ve?.duplicate_detected}`);
+        console.log(`   📛 ve.duplicate_count: ${ve?.duplicate_count}`);
+        console.log(`   📛 verification_results exists: ${!!vr}`);
+        console.log(`   📛 vr.fraud_risk: ${JSON.stringify(vr?.fraud_risk)?.substring(0, 100)}`);
+        console.log(`   📛 vr.duplicate_detection: ${JSON.stringify(vr?.duplicate_detection)?.substring(0, 100)}`);
 
         res.json({
             success: true,
