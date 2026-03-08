@@ -3,105 +3,63 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 const AuthContext = createContext();
 
 export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
-    return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 };
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        // ✅ Initialize auth state from localStorage on mount
-        const initializeAuth = () => {
-            try {
-                const token = localStorage.getItem('authToken');
-                const userData = localStorage.getItem('userData');
+  useEffect(() => {
+    try {
+      const token = localStorage.getItem('authToken');
+      const data = localStorage.getItem('userData');
+      if (token && data) {
+        const parsed = JSON.parse(data);
+        setUser(parsed);
+        setIsAuthenticated(true);
+      }
+    } catch {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('userData');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-                if (token && userData) {
-                    const parsedUser = JSON.parse(userData);
-                    setUser(parsedUser);
-                    setIsAuthenticated(true);
-                    console.log('✅ User session restored:', parsedUser.phoneNumber);
-                } else {
-                    console.log('ℹ️ No active session found');
-                }
-            } catch (error) {
-                console.error('❌ Failed to restore session:', error);
-                // Clear corrupted data
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('userData');
-            } finally {
-                setLoading(false);
-            }
-        };
+  const login = useCallback((token, userData) => {
+    localStorage.setItem('authToken', token);
+    localStorage.setItem('userData', JSON.stringify(userData));
+    setUser(userData);
+    setIsAuthenticated(true);
+  }, []);
 
-        initializeAuth();
-    }, []);
+  const logout = useCallback(() => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userData');
+    setUser(null);
+    setIsAuthenticated(false);
+  }, []);
 
-    // ✅ Memoized login function
-    const login = useCallback((token, userData) => {
-        try {
-            localStorage.setItem('authToken', token);
-            localStorage.setItem('userData', JSON.stringify(userData));
-            setUser(userData);
-            setIsAuthenticated(true);
-            console.log('✅ User logged in:', userData.phoneNumber);
-        } catch (error) {
-            console.error('❌ Failed to save login data:', error);
-            throw new Error('Failed to save session data');
-        }
-    }, []);
+  const getToken = useCallback(() => localStorage.getItem('authToken'), []);
 
-    // ✅ Memoized logout function
-    const logout = useCallback(() => {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userData');
-        setUser(null);
-        setIsAuthenticated(false);
-        console.log('✅ User logged out');
-    }, []);
+  const isAdmin = user?.role === 'admin';
 
-    // ✅ Memoized getToken function
-    const getToken = useCallback(() => {
-        return localStorage.getItem('authToken');
-    }, []);
+  const updateUser = useCallback(
+    (updatedData) => {
+      const newUser = { ...user, ...updatedData };
+      localStorage.setItem('userData', JSON.stringify(newUser));
+      setUser(newUser);
+    },
+    [user]
+  );
 
-    // ✅ Additional helper: Check if token exists
-    const hasToken = useCallback(() => {
-        return !!localStorage.getItem('authToken');
-    }, []);
-
-    // ✅ Additional helper: Update user data
-    const updateUser = useCallback((updatedData) => {
-        try {
-            const newUserData = { ...user, ...updatedData };
-            localStorage.setItem('userData', JSON.stringify(newUserData));
-            setUser(newUserData);
-            console.log('✅ User data updated');
-        } catch (error) {
-            console.error('❌ Failed to update user data:', error);
-        }
-    }, [user]);
-
-    const value = {
-        user,
-        isAuthenticated,
-        loading,
-        login,
-        logout,
-        getToken,
-        hasToken,
-        updateUser
-    };
-
-    return (
-        <AuthContext.Provider value={value}>
-            {children}
-        </AuthContext.Provider>
-    );
+  return (
+    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, logout, getToken, isAdmin, updateUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };

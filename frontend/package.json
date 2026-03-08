@@ -10,6 +10,7 @@
     "@testing-library/user-event": "^13.5.0",
     "aceternity-ui": "^0.2.2",
     "axios": "^1.12.2",
+    "daisyui": "^5.5.19",
     "framer-motion": "^12.23.18",
     "gsap": "^3.13.0",
     "jspdf": "^3.0.3",
@@ -21,9 +22,9 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -36,7 +37,9 @@
     "production": [
       ">0.2%",
       "not dead",
-      "not op_mini all"
+      "not op_mini all",
+      "last 2 safari major versions",
+      "last 2 ios_saf major versions"
     ],
     "development": [
       "last 1 chrome version",
@@ -45,6 +48,7 @@
     ]
   },
   "devDependencies": {
+    "@craco/craco": "^7.1.0",
     "@types/react": "^19.1.13",
     "autoprefixer": "^10.4.21",
     "init": "^0.1.2",
