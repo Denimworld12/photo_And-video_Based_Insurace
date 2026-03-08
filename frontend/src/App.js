@@ -22,6 +22,7 @@ import ClaimResults from './pages/user/ClaimResults';
 import Notifications from './pages/user/Notifications';
 import Profile from './pages/user/Profile';
 import Settings from './pages/user/Settings';
+import AppInstallGuide from './pages/user/AppInstallGuide';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -91,6 +92,7 @@ function AppRoutes() {
         <Route path="notifications" element={<Notifications />} />
         <Route path="profile" element={<Profile />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="install-app" element={<AppInstallGuide />} />
       </Route>
 
       {/* ── Admin Panel Routes ── */}

@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import ThemeSwitcher from '../ThemeSwitcher';
+import usePWAInstall from '../../hooks/usePWAInstall';
 import {
   LayoutDashboard, Users, FileText, ClipboardCheck, Activity,
-  LogOut, Menu, X, ExternalLink, ShieldAlert
+  LogOut, Menu, X, ExternalLink, Download
 } from 'lucide-react';
 
 const navItems = [
@@ -19,6 +20,7 @@ export default function AdminLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { canInstall, promptInstall } = usePWAInstall();
 
   const handleLogout = () => { logout(); navigate('/'); };
 
@@ -26,9 +28,7 @@ export default function AdminLayout() {
     <>
       <div className="p-5 border-b border-base-300">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-secondary rounded-xl flex items-center justify-center">
-            <ShieldAlert className="w-6 h-6 text-secondary-content" />
-          </div>
+          <img src="/images/government-emblem.png" alt="Emblem" className="w-10 h-10 object-contain" />
           <div>
             <h1 className="text-lg font-bold text-base-content">Admin Panel</h1>
             <p className="text-xs text-base-content/50">PBI AgriInsure</p>
@@ -60,8 +60,13 @@ export default function AdminLayout() {
         </div>
       </nav>
 
-      <div className="p-4 border-t border-base-300">
-        <div className="flex items-center gap-3 mb-3">
+      <div className="p-4 border-t border-base-300 space-y-2">
+        {canInstall && (
+          <button onClick={promptInstall} className="btn btn-ghost btn-sm btn-block gap-2 justify-start text-primary">
+            <Download className="w-4 h-4" /> Install App
+          </button>
+        )}
+        <div className="flex items-center gap-3 mb-2">
           <div className="avatar placeholder">
             <div className="bg-secondary text-secondary-content w-9 rounded-full">
               <span className="text-sm">{user?.phoneNumber?.slice(-2) || 'A'}</span>

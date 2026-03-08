@@ -1,6 +1,6 @@
 import React from 'react';
 import ThemeSwitcher from '../../components/ThemeSwitcher';
-import { Settings as SettingsIcon, Palette, Info } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Info, ShieldCheck, Globe, Phone } from 'lucide-react';
 
 export default function Settings() {
   return (
@@ -30,21 +30,28 @@ export default function Settings() {
       <div className="card bg-base-100 shadow-md">
         <div className="card-body">
           <h3 className="font-semibold text-base-content flex items-center gap-2 mb-4">
-            <Info className="w-5 h-5 text-primary" /> About
+            <Info className="w-5 h-5 text-primary" /> About PBI AgriInsure
           </h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-base-content/60">App Name</span>
-              <span className="font-medium">Crop Insurance Platform</span>
+          <div className="flex items-center gap-4 mb-4 p-4 bg-base-200 rounded-xl">
+            <img src="/images/government-emblem.png" alt="Government Emblem" className="w-12 h-12 object-contain" />
+            <div>
+              <p className="font-semibold text-base-content">PBI AgriInsure</p>
+              <p className="text-xs text-base-content/50">Photo & Video-Based Insurance Assessment</p>
             </div>
-            <div className="flex justify-between">
-              <span className="text-base-content/60">Version</span>
-              <span className="font-medium">2.0.0</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-base-content/60">Technology</span>
-              <span className="font-medium">AI-Powered Photo Analysis</span>
-            </div>
+          </div>
+          <div className="space-y-3 text-sm">
+            {[
+              { label: 'Version', value: '2.0.0', icon: ShieldCheck },
+              { label: 'Technology', value: 'AI-Powered Photo Analysis (Gemini)', icon: Globe },
+              { label: 'Helpline', value: '1800-180-1551 (Toll Free)', icon: Phone },
+            ].map(item => (
+              <div key={item.label} className="flex items-center justify-between py-2 border-b border-base-200 last:border-0">
+                <span className="flex items-center gap-2 text-base-content/60">
+                  <item.icon className="w-4 h-4" /> {item.label}
+                </span>
+                <span className="font-medium text-base-content">{item.value}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>

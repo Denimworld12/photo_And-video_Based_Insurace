@@ -151,7 +151,18 @@ exports.getClaimDetail = async (req, res) => {
   try {
     const claim = await Claim.findById(req.params.id).populate('userId', 'phoneNumber fullName address farmDetails');
     if (!claim) return res.status(404).json({ success: false, error: 'Claim not found' });
-    res.json({ success: true, claim });
+
+    // Build fallback URLs for images missing cloudinaryUrl
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const claimObj = claim.toObject();
+    if (claimObj.uploadedImages) {
+      claimObj.uploadedImages = claimObj.uploadedImages.map((img) => ({
+        ...img,
+        cloudinaryUrl: img.cloudinaryUrl || (img.localPath ? `${baseUrl}/uploads/${require('path').basename(img.localPath)}` : ''),
+      }));
+    }
+
+    res.json({ success: true, claim: claimObj });
   } catch (err) {
     console.error('❌ getClaimDetail:', err);
     res.status(500).json({ success: false, error: 'Failed to fetch claim' });

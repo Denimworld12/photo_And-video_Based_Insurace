@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import ThemeSwitcher from '../ThemeSwitcher';
+import usePWAInstall from '../../hooks/usePWAInstall';
 import {
   LayoutDashboard, FileText, ClipboardList, Bell, User,
-  LogOut, Menu, X, Settings, ShieldCheck
+  LogOut, Menu, X, Settings, Download
 } from 'lucide-react';
 
 const navItems = [
@@ -14,12 +15,14 @@ const navItems = [
   { to: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { to: '/dashboard/profile', label: 'Profile', icon: User },
   { to: '/dashboard/settings', label: 'Settings', icon: Settings },
+  { to: '/dashboard/install-app', label: 'Install App', icon: Download },
 ];
 
 export default function UserLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { canInstall, promptInstall } = usePWAInstall();
 
   const handleLogout = () => { logout(); navigate('/'); };
 
@@ -28,9 +31,7 @@ export default function UserLayout() {
       {/* Brand */}
       <div className="p-5 border-b border-base-300">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-            <ShieldCheck className="w-6 h-6 text-primary-content" />
-          </div>
+          <img src="/images/government-emblem.png" alt="Emblem" className="w-10 h-10 object-contain" />
           <div>
             <h1 className="text-lg font-bold text-base-content">PBI AgriInsure</h1>
             <p className="text-xs text-base-content/50">Farmer Portal</p>
@@ -59,8 +60,13 @@ export default function UserLayout() {
       </nav>
 
       {/* User footer */}
-      <div className="p-4 border-t border-base-300">
-        <div className="flex items-center gap-3 mb-3">
+      <div className="p-4 border-t border-base-300 space-y-2">
+        {canInstall && (
+          <button onClick={promptInstall} className="btn btn-ghost btn-sm btn-block gap-2 justify-start text-primary">
+            <Download className="w-4 h-4" /> Install App
+          </button>
+        )}
+        <div className="flex items-center gap-3 mb-2">
           <div className="avatar placeholder">
             <div className="bg-primary text-primary-content w-9 rounded-full">
               <span className="text-sm">{user?.fullName?.[0] || user?.phoneNumber?.slice(-2) || 'U'}</span>

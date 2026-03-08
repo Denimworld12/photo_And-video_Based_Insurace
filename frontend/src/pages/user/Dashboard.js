@@ -56,14 +56,21 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
-      {/* Welcome */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-base-content flex items-center gap-2">
-          <LayoutDashboard className="w-7 h-7 text-primary" />
-          Welcome, {user?.fullName || 'Farmer'}
-        </h1>
-        <p className="text-base-content/60 mt-1">Manage your crop insurance policies and claims</p>
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Welcome Banner */}
+      <div className="card bg-gradient-to-r from-primary to-primary/80 text-primary-content shadow-lg overflow-hidden">
+        <div className="card-body py-4 px-5 relative">
+          <div className="absolute right-0 top-0 bottom-0 w-48 opacity-10 hidden sm:block">
+            <img src="/images/frontFarmer.png" alt="" className="h-full object-cover object-top" />
+          </div>
+          <div className="relative">
+            <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+              <LayoutDashboard className="w-6 h-6" />
+              Welcome, {user?.fullName || 'Farmer'}
+            </h1>
+            <p className="opacity-80 mt-0.5 text-sm">Manage your crop insurance policies and claims</p>
+          </div>
+        </div>
       </div>
 
       {/* Stats */}
@@ -91,29 +98,29 @@ const Dashboard = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className="grid sm:grid-cols-2 gap-3">
         <div onClick={() => navigate('/dashboard/policies')} className="card bg-base-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-          <div className="card-body flex-row items-center gap-4">
-            <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
-              <Plus className="w-6 h-6 text-primary" />
+          <div className="card-body p-4 flex-row items-center gap-3">
+            <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center shrink-0">
+              <Plus className="w-5 h-5 text-primary" />
             </div>
-            <div className="flex-1">
-              <h3 className="card-title text-base">File New Claim</h3>
-              <p className="text-sm text-base-content/60">Select a policy and submit a crop damage claim</p>
+            <div className="flex-1 min-w-0">
+              <h3 className="card-title text-sm">File New Claim</h3>
+              <p className="text-xs text-base-content/60">Select a policy and submit a claim</p>
             </div>
-            <ArrowRight className="w-5 h-5 text-base-content/30" />
+            <ArrowRight className="w-4 h-4 text-base-content/30 shrink-0" />
           </div>
         </div>
         <div onClick={() => navigate('/dashboard/claims')} className="card bg-base-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-          <div className="card-body flex-row items-center gap-4">
-            <div className="w-12 h-12 bg-secondary/10 rounded-xl flex items-center justify-center shrink-0">
-              <ClipboardList className="w-6 h-6 text-secondary" />
+          <div className="card-body p-4 flex-row items-center gap-3">
+            <div className="w-10 h-10 bg-secondary/10 rounded-xl flex items-center justify-center shrink-0">
+              <ClipboardList className="w-5 h-5 text-secondary" />
             </div>
-            <div className="flex-1">
-              <h3 className="card-title text-base">View My Claims</h3>
-              <p className="text-sm text-base-content/60">Track claim status, results, and payouts</p>
+            <div className="flex-1 min-w-0">
+              <h3 className="card-title text-sm">View My Claims</h3>
+              <p className="text-xs text-base-content/60">Track status, results, and payouts</p>
             </div>
-            <ArrowRight className="w-5 h-5 text-base-content/30" />
+            <ArrowRight className="w-4 h-4 text-base-content/30 shrink-0" />
           </div>
         </div>
       </div>
@@ -121,14 +128,14 @@ const Dashboard = () => {
       {/* Active Policies */}
       {policies.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-base-content mb-3 flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" /> Available Policies
           </h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {policies.slice(0, 6).map((p) => (
               <div key={p._id} className="card bg-base-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
                    onClick={() => navigate(`/dashboard/submit-claim/${p._id}`)}>
-                <div className="card-body p-5">
+                <div className="card-body p-4">
                   <h3 className="font-semibold text-base-content">{p.name}</h3>
                   <div className="badge badge-primary badge-outline badge-sm">{p.type || 'Crop'}</div>
                   {p.premiumRate && <p className="text-xs text-base-content/50">Premium: {p.premiumRate}%</p>}

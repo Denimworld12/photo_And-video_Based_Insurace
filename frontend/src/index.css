@@ -10,18 +10,24 @@
 }
 
 @layer base {
-  * {
-    margin: 0;
-    padding: 0;
+  *,
+  *::before,
+  *::after {
     box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
     @apply font-sans antialiased bg-base-200 text-base-content;
+    /* Safari text rendering fix */
+    text-rendering: optimizeLegibility;
   }
 
   html {
     scroll-behavior: smooth;
+    /* iOS Safari viewport fix */
+    -webkit-text-size-adjust: 100%;
   }
 }
 
@@ -29,10 +35,14 @@
   /* ── Gradient headline for landing ── */
   .gradient-heading {
     @apply bg-gradient-to-r from-base-content via-primary to-primary-content bg-clip-text text-transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .gradient-heading-alt {
     @apply bg-gradient-to-r from-neutral via-primary to-secondary bg-clip-text text-transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   /* ── Page structure ── */
@@ -42,5 +52,19 @@
 
   .section-title {
     @apply text-2xl font-bold text-base-content;
+  }
+
+  /* ── Safari backdrop-filter fix ── */
+  .backdrop-blur-sm {
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .backdrop-blur {
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .backdrop-blur-md {
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .backdrop-blur-lg {
+    -webkit-backdrop-filter: blur(16px);
   }
 }

@@ -309,9 +309,41 @@ export default function ClaimResults() {
         </div>
       </Section>
 
-      {/* Image Details */}
+      {/* Uploaded Evidence Photos */}
+      {claimInfo?.uploadedImages?.length > 0 && (
+        <div className="card bg-base-100 shadow-sm border border-base-200">
+          <div className="card-body p-4">
+            <h3 className="font-semibold text-base-content flex items-center gap-2 mb-4">
+              <Camera className="w-4 h-4 text-primary" /> Evidence Photos ({claimInfo.uploadedImages.length})
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {claimInfo.uploadedImages.map((img, i) => (
+                <div key={i} className="relative aspect-video bg-base-200 rounded-xl overflow-hidden border border-base-300">
+                  {img.url ? (
+                    <img src={img.url} alt={img.stepId || `Evidence ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-base-content/30 text-sm">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                    <p className="text-white text-xs font-medium">{img.stepId || `Step ${i + 1}`}</p>
+                    {img.coordinates?.lat && (
+                      <p className="text-white/70 text-[10px] flex items-center gap-0.5">
+                        <MapPin className="w-2 h-2" />{img.coordinates.lat.toFixed(4)}, {img.coordinates.lon.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Analysis Details */}
       {imageDetails.length > 0 && (
-        <Section id="images" title={`Image Details (${imageDetails.length})`} icon={Camera}>
+        <Section id="images" title={`Image Analysis (${imageDetails.length})`} icon={Camera}>
           <div className="space-y-3">
             {imageDetails.map((img, i) => (
               <div key={i} className="p-3 bg-base-200 rounded-lg text-sm">

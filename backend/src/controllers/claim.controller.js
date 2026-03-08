@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const Claim = require('../models/Claim');
 const Notification = require('../models/Notification');
 const { uploadClaimImage } = require('../services/cloudinary.service');
@@ -207,9 +208,9 @@ exports.completeClaim = async (req, res) => {
       });
     } catch { /* ignore notification failure */ }
 
-    // Clean up local files
+    // Clean up local files only if Cloudinary upload succeeded
     for (const img of images) {
-      if (img.localPath && fs.existsSync(img.localPath)) {
+      if (img.cloudinaryUrl && img.localPath && fs.existsSync(img.localPath)) {
         fs.unlink(img.localPath, () => {});
       }
     }
@@ -251,6 +252,15 @@ exports.getClaimResults = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
+    // Build image URLs (prefer Cloudinary, fall back to local serving)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const imageUrls = (claim.uploadedImages || []).map((img) => ({
+      stepId: img.stepId,
+      url: img.cloudinaryUrl || (img.localPath ? `${baseUrl}/uploads/${path.basename(img.localPath)}` : ''),
+      coordinates: img.coordinates,
+      mediaType: img.mediaType,
+    }));
+
     res.json({
       success: true,
       claim: {
@@ -262,6 +272,7 @@ exports.getClaimResults = async (req, res) => {
         resubmittedFrom: claim.resubmittedFrom || null,
         confidenceScore: claim.confidenceScore || null,
         insuranceId: claim.insuranceId || null,
+        uploadedImages: imageUrls,
       },
       processing_result: claim.processingResult || {},
       metadata: { pythonWorker: isPipelineAvailable() ? 'used' : 'fallback' },

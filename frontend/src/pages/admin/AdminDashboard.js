@@ -43,17 +43,21 @@ export default function AdminDashboard() {
   const approvalRate = stats.totalClaims > 0 ? ((stats.approvedClaims || 0) / stats.totalClaims * 100).toFixed(1) : '0';
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-base-content flex items-center gap-2">
-            <LayoutDashboard className="w-6 h-6 text-secondary" /> Admin Dashboard
-          </h1>
-          <p className="text-sm text-base-content/50 mt-1">Crop Insurance Platform Overview</p>
+    <div className="max-w-6xl mx-auto space-y-5">
+      <div className="card bg-gradient-to-r from-secondary to-secondary/80 text-secondary-content shadow-lg">
+        <div className="card-body py-4 px-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <LayoutDashboard className="w-6 h-6" /> Admin Dashboard
+              </h1>
+              <p className="text-sm opacity-80 mt-1">Crop Insurance Platform Overview</p>
+            </div>
+            <button onClick={() => navigate('/admin/claims')} className="btn btn-sm bg-white/20 border-0 hover:bg-white/30 text-secondary-content gap-2">
+              <Eye className="w-4 h-4" /> Review Claims
+            </button>
+          </div>
         </div>
-        <button onClick={() => navigate('/admin/claims')} className="btn btn-secondary btn-sm gap-2">
-          <Eye className="w-4 h-4" /> Review Claims
-        </button>
       </div>
 
       {pendingCount > 0 && (
@@ -67,7 +71,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      <div className="stats stats-vertical lg:stats-horizontal shadow w-full">
+      <div className="stats stats-vertical sm:stats-horizontal shadow w-full">
         <div className="stat">
           <div className="stat-figure text-primary"><Users className="w-8 h-8" /></div>
           <div className="stat-title">Farmers</div>
@@ -94,16 +98,16 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-3">
         {[
           { value: stats.approvedClaims ?? 0, label: 'Approved', Icon: CheckCircle2, color: 'text-success' },
           { value: stats.rejectedClaims ?? 0, label: 'Rejected', Icon: XCircle, color: 'text-error' },
           { value: `${approvalRate}%`, label: 'Approval Rate', Icon: TrendingUp, color: 'text-info' },
         ].map(s => (
           <div key={s.label} className="card bg-base-100 shadow-sm border border-base-200">
-            <div className="card-body items-center text-center p-4">
-              <s.Icon className={`w-6 h-6 ${s.color}`} />
-              <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+            <div className="card-body items-center text-center p-3">
+              <s.Icon className={`w-5 h-5 ${s.color}`} />
+              <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
               <div className="text-xs text-base-content/50">{s.label}</div>
             </div>
           </div>
@@ -121,8 +125,8 @@ export default function AdminDashboard() {
           ].map(a => (
             <button key={a.to} onClick={() => navigate(a.to)}
               className="card bg-base-100 shadow-sm hover:shadow-md border border-base-200 transition-all">
-              <div className="card-body items-center text-center p-5 gap-2">
-                <a.Icon className="w-8 h-8 text-secondary" />
+              <div className="card-body items-center text-center p-4 gap-1.5">
+                <a.Icon className="w-6 h-6 text-secondary" />
                 <span className="text-sm font-semibold">{a.label}</span>
                 <span className="text-xs text-base-content/40">{a.desc}</span>
               </div>
@@ -132,9 +136,9 @@ export default function AdminDashboard() {
       </div>
 
       <div className="card bg-base-100 shadow-md">
-        <div className="card-body">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="card-title text-base">Recent Claims</h2>
+        <div className="card-body p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="card-title text-sm">Recent Claims</h2>
             <button onClick={() => navigate('/admin/claims')} className="btn btn-ghost btn-sm gap-1">
               View All <ArrowRight className="w-4 h-4" />
             </button>
