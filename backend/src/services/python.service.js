@@ -22,6 +22,8 @@ const isPipelineAvailable = () => fs.existsSync(PIPELINE_PATH);
  * @param {number}   opts.fieldSize      – estimated field m²
  * @param {number}   opts.sumInsured
  * @param {number}   opts.claimedDamage  – percentage
+ * @param {string}   opts.sowingDate     – ISO date string (e.g. '2025-06-15')
+ * @param {string}   opts.cropType       – crop type (e.g. 'maize', 'wheat')
  * @returns {Promise<object>}  parsed JSON from Python stdout
  */
 const runPipeline = (imagePaths, opts = {}) => {
@@ -40,6 +42,12 @@ const runPipeline = (imagePaths, opts = {}) => {
 
     if (opts.userLat != null && opts.userLon != null) {
       args.push('--user-lat', String(opts.userLat), '--user-lon', String(opts.userLon));
+    }
+    if (opts.sowingDate) {
+      args.push('--sowing-date', opts.sowingDate);
+    }
+    if (opts.cropType) {
+      args.push('--crop-type', opts.cropType);
     }
     if (process.env.WEATHER_API_KEY) {
       args.push('--api-key', process.env.WEATHER_API_KEY);
@@ -105,6 +113,22 @@ const fallbackResult = (reason = 'Pipeline unavailable') => ({
     location_verified: false,
     processing_note: reason,
   },
+  // v2 fields (CNN / GradCAM / Temporal)
+  cnn_classification: {
+    model_loaded: false,
+    backbone: null,
+    rgb_damage_pct: 35,
+    cnn_damage_pct: null,
+    hybrid_weight: { cnn: 0.7, rgb: 0.3 },
+  },
+  temporal_context: {
+    sowing_date: null,
+    days_after_sowing: -1,
+    day_of_year: -1,
+    growth_stage: 'unknown',
+  },
+  gradcam_heatmaps: [],
+  scoring_method: 'FALLBACK',
 });
 
 /**

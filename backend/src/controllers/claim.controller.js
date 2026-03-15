@@ -136,9 +136,20 @@ exports.completeClaim = async (req, res) => {
       if (img.coordinates?.lat) { userLat = img.coordinates.lat; userLon = img.coordinates.lon; break; }
     }
 
+    // Extract sowingDate and cropType for temporal context
+    const sowingDate = claim.sowingDate
+      ? new Date(claim.sowingDate).toISOString().split('T')[0]
+      : null;
+    const cropType = claim.cropType || null;
+
     let pythonResult;
     try {
-      pythonResult = await runPipeline(imagePaths, { userLat, userLon });
+      pythonResult = await runPipeline(imagePaths, {
+        userLat,
+        userLon,
+        sowingDate,
+        cropType,
+      });
     } catch (err) {
       console.error('❌ Python pipeline failed:', err.message);
       pythonResult = fallbackResult(err.message);
@@ -158,6 +169,11 @@ exports.completeClaim = async (req, res) => {
         weather_verified: pythonResult.verification_results?.weather?.status === 'MATCH',
         details: pythonResult.verification_results,
       },
+      // v2: CNN, GradCAM, Temporal
+      cnn_classification: pythonResult.cnn_classification || null,
+      temporal_context: pythonResult.temporal_context || null,
+      gradcam_heatmaps: pythonResult.gradcam_heatmaps || [],
+      scoring_method: pythonResult.scoring_method || 'RGB_ONLY',
     };
 
     // Generate AI summary using Gemini
@@ -185,6 +201,7 @@ exports.completeClaim = async (req, res) => {
           status: decision.status === 'approved' ? 'approved' : decision.status === 'rejected' ? 'rejected' : 'manual_review',
           confidenceScore: confidence,
           payoutAmount: decision.payout_approved ? (pythonResult.payout_calculation?.final_payout_amount || 0) : 0,
+          heatmapUrls: processingResult.gradcam_heatmaps || [],
           submittedAt: new Date(),
           completedAt: new Date(),
         },
@@ -211,7 +228,7 @@ exports.completeClaim = async (req, res) => {
     // Clean up local files only if Cloudinary upload succeeded
     for (const img of images) {
       if (img.cloudinaryUrl && img.localPath && fs.existsSync(img.localPath)) {
-        fs.unlink(img.localPath, () => {});
+        fs.unlink(img.localPath, () => { });
       }
     }
 

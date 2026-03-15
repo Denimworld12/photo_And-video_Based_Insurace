@@ -32,6 +32,7 @@ const claimSchema = new mongoose.Schema(
     insuranceNumber: String,
     cropType: String,
     farmArea: Number,
+    sowingDate: Date,
     lossReason: {
       type: String,
       enum: ['drought', 'flood', 'pest', 'disease', 'hail', 'cyclone', 'other'],
@@ -40,6 +41,9 @@ const claimSchema = new mongoose.Schema(
 
     // Media
     uploadedImages: [uploadedImageSchema],
+
+    // AI Explainability (GradCAM heatmap URLs)
+    heatmapUrls: [String],
 
     // Processing result from Python pipeline
     processingResult: { type: mongoose.Schema.Types.Mixed, default: {} },
