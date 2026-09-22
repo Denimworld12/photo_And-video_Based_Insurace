@@ -37,9 +37,10 @@ npm test          # node --test, no database or network needed
 npm run dev       # nodemon; JWT_SECRET must be set
 ```
 
-- `npm test` covers the pipeline-integration contract, OTP verification, request validation and
-  upload handling. There is no HTTP-level or database-level test harness; changes to controllers
-  need manual verification against a running server.
+- `npm test` covers the pipeline-integration contract, OTP verification, request validation,
+  upload handling, Claim schema defaults, and controller helpers exported under a `_` prefix. There
+  is no HTTP-level or database-level test harness; controller request flows need manual
+  verification against a running server.
 - The backend starts without MongoDB: policies fall back to seed data, claims to an in-memory cache,
   and login issues a development-only farmer session. None of these fallbacks apply when
   `NODE_ENV=production`, where `server.js` refuses to start without `MONGODB_URI`, `ALLOWED_ORIGINS`
