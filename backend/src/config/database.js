@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const connectDB = async () => {
   try {
     if (!process.env.MONGODB_URI) {
-      console.log('⚠️  No MONGODB_URI found – running without database');
+      console.warn('[DB] No MONGODB_URI configured, starting without a database');
       return null;
     }
 
@@ -11,10 +11,10 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 5000,
     });
 
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    console.log(`[DB] Connected to MongoDB at ${conn.connection.host}`);
     return conn;
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
+    console.error('[DB] Connection failed:', error.message);
     if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     }

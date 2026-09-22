@@ -251,7 +251,7 @@ class InsuranceFieldAnalyzer:
     def analyze_field(self, image_paths: List[str],
                       manual_field_area_m2: Optional[float] = None) -> Dict:
         """
-        🔥 MAIN FUNCTION - Insurance-grade field assessment
+        Main entry point: insurance-grade field assessment
         
         Args:
             image_paths: List of 4-10 image paths
@@ -388,7 +388,7 @@ def assess_field_damage(image_paths: List[str],
                         manual_field_area_m2: Optional[float] = None,
                         model_path: str = None) -> Dict:
     """
-    🔥 MAIN FUNCTION - Use this in your application!
+    Main entry point for callers of this module.
     
     Args:
         image_paths: List of 4-10 image file paths
@@ -414,10 +414,10 @@ def assess_field_damage(image_paths: List[str],
 def print_insurance_report(report: Dict):
     """Pretty print the report"""
     print("\n" + "="*60)
-    print("🌾 CROP DAMAGE INSURANCE ASSESSMENT")
+    print("CROP DAMAGE INSURANCE ASSESSMENT")
     print("="*60)
     
-    print(f"\n📋 ID: {report['assessment_id']}")
+    print(f"\nID: {report['assessment_id']}")
     print(f"\nDamage Type: {report['damage_type_name']} ({report['damage_type']})")
     print(f"Confidence: {report['damage_type_confidence']:.1%}")
     
@@ -431,7 +431,7 @@ def print_insurance_report(report: Dict):
     print(f"Confidence: {report['overall_confidence']:.1%}")
     
     if report['requires_manual_review']:
-        print("⚠️  REQUIRES MANUAL REVIEW")
+        print("REQUIRES MANUAL REVIEW")
     print("="*60)
 
 
@@ -466,4 +466,4 @@ if __name__ == "__main__":
     # Save JSON
     with open('insurance_report.json', 'w') as f:
         json.dump(report, f, indent=2)
-    print(f"\n✓ Report saved to: insurance_report.json")
+    print("\nReport saved to: insurance_report.json")

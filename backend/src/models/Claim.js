@@ -72,8 +72,9 @@ const claimSchema = new mongoose.Schema(
     resubmittedFrom: { type: String, default: '' },
     resubmissionCount: { type: Number, default: 0 },
 
-    // AI confidence score
-    confidenceScore: { type: Number, default: 0 },
+    // AI confidence score. Null until something measures it: a default of 0
+    // reads as a measured zero-confidence assessment.
+    confidenceScore: { type: Number, default: null },
 
     // Payout
     payoutAmount: { type: Number, default: 0 },

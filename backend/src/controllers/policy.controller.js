@@ -1,6 +1,11 @@
+const mongoose = require('mongoose');
 const Policy = require('../models/Policy');
+const AdminAction = require('../models/AdminAction');
 
-// Seed data used when DB is empty or unavailable
+const isDbConnected = () => mongoose.connection.readyState === 1;
+
+// Seed data used when the database is unavailable or holds no policies, so the
+// farmer portal still has something to show during local development.
 const SEED_POLICIES = [
   {
     _id: '1',
@@ -46,16 +51,23 @@ const SEED_POLICIES = [
 /* ─── List Policies ─── */
 exports.listPolicies = async (req, res) => {
   try {
-    let policies;
-    try {
+    let policies = [];
+    let source = 'database';
+
+    if (isDbConnected()) {
       policies = await Policy.find({ isActive: true }).select('-__v');
-      if (!policies.length) throw new Error('empty');
-    } catch {
-      policies = SEED_POLICIES;
+    } else {
+      console.warn('[POLICY:LIST] Database not connected, serving seed policies');
     }
-    res.json({ success: true, insurances: policies, count: policies.length });
+
+    if (!policies.length) {
+      policies = SEED_POLICIES;
+      source = 'seed';
+    }
+
+    res.json({ success: true, insurances: policies, count: policies.length, source });
   } catch (err) {
-    console.error('❌ listPolicies:', err);
+    console.error('[POLICY:LIST] Failed to fetch policies:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch policies' });
   }
 };
@@ -64,18 +76,21 @@ exports.listPolicies = async (req, res) => {
 exports.getPolicy = async (req, res) => {
   try {
     const { id } = req.params;
-    let policy;
-    try {
-      policy = await Policy.findById(id);
-    } catch {
-      policy = SEED_POLICIES.find((p) => p._id === id) || SEED_POLICIES[0];
+
+    if (isDbConnected() && mongoose.isValidObjectId(id)) {
+      const policy = await Policy.findById(id).select('-__v');
+      if (policy) return res.json({ success: true, insurance: policy });
     }
-    if (!policy) {
-      policy = SEED_POLICIES.find((p) => p._id === id) || SEED_POLICIES[0];
-    }
-    res.json({ success: true, insurance: policy });
+
+    // A seed id (or a code) is still resolvable; anything else is genuinely
+    // missing. Returning an arbitrary policy for an unknown id would quote the
+    // wrong coverage back to the farmer.
+    const seed = SEED_POLICIES.find((p) => p._id === id || p.code === String(id).toUpperCase());
+    if (seed) return res.json({ success: true, insurance: seed, source: 'seed' });
+
+    res.status(404).json({ success: false, error: 'Policy not found' });
   } catch (err) {
-    console.error('❌ getPolicy:', err);
+    console.error('[POLICY:GET] Failed to fetch policy:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch policy' });
   }
 };
@@ -83,10 +98,26 @@ exports.getPolicy = async (req, res) => {
 /* ─── Admin: Create Policy ─── */
 exports.createPolicy = async (req, res) => {
   try {
-    const policy = await Policy.create(req.body);
+    const policy = await Policy.create({ ...req.body, code: String(req.body.code).toUpperCase() });
+
+    await AdminAction.create({
+      adminId: req.user._id,
+      action: 'create_policy',
+      targetType: 'policy',
+      targetId: policy._id.toString(),
+      details: { code: policy.code, name: policy.name },
+      ipAddress: req.ip,
+    });
+
     res.status(201).json({ success: true, policy });
   } catch (err) {
-    console.error('❌ createPolicy:', err);
+    console.error('[POLICY:CREATE] Failed to create policy:', err.message);
+    if (err.code === 11000) {
+      return res.status(409).json({ success: false, error: 'A policy with that code already exists' });
+    }
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ success: false, error: 'Invalid policy details' });
+    }
     res.status(500).json({ success: false, error: 'Failed to create policy' });
   }
 };
@@ -94,23 +125,54 @@ exports.createPolicy = async (req, res) => {
 /* ─── Admin: Update Policy ─── */
 exports.updatePolicy = async (req, res) => {
   try {
-    const policy = await Policy.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const updates = { ...req.body };
+    if (updates.code) updates.code = String(updates.code).toUpperCase();
+
+    const policy = await Policy.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
     if (!policy) return res.status(404).json({ success: false, error: 'Policy not found' });
+
+    await AdminAction.create({
+      adminId: req.user._id,
+      action: 'update_policy',
+      targetType: 'policy',
+      targetId: policy._id.toString(),
+      details: { fields: Object.keys(updates) },
+      ipAddress: req.ip,
+    });
+
     res.json({ success: true, policy });
   } catch (err) {
-    console.error('❌ updatePolicy:', err);
+    console.error('[POLICY:UPDATE] Failed to update policy:', err.message);
+    if (err.code === 11000) {
+      return res.status(409).json({ success: false, error: 'A policy with that code already exists' });
+    }
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ success: false, error: 'Invalid policy details' });
+    }
     res.status(500).json({ success: false, error: 'Failed to update policy' });
   }
 };
 
-/* ─── Admin: Delete Policy ─── */
+/* ─── Admin: Delete (deactivate) Policy ─── */
 exports.deletePolicy = async (req, res) => {
   try {
     const policy = await Policy.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
     if (!policy) return res.status(404).json({ success: false, error: 'Policy not found' });
+
+    await AdminAction.create({
+      adminId: req.user._id,
+      action: 'update_policy',
+      targetType: 'policy',
+      targetId: policy._id.toString(),
+      details: { deactivated: true, code: policy.code },
+      ipAddress: req.ip,
+    });
+
     res.json({ success: true, message: 'Policy deactivated' });
   } catch (err) {
-    console.error('❌ deletePolicy:', err);
+    console.error('[POLICY:DELETE] Failed to deactivate policy:', err.message);
     res.status(500).json({ success: false, error: 'Failed to delete policy' });
   }
 };
+
+module.exports.SEED_POLICIES = SEED_POLICIES;

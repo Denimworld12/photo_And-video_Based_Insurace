@@ -129,7 +129,7 @@ The platform eliminates the need for manual field inspections by:
 ```
 photo_And-video_Based_Insurace/
 │
-├── pipeline.py                      # Root AI pipeline (EXIF, geofencing, PyTorch)
+├── pipeline.py                      # Standalone AI pipeline (not called by the backend)
 ├── README.md                        # This file
 │
 ├── backend/                         # Node.js Express API Server
@@ -137,9 +137,7 @@ photo_And-video_Based_Insurace/
 │   ├── package.json                 # Node dependencies & scripts
 │   ├── .env.example                 # Environment variable template
 │   ├── data/                        # Local data files
-│   ├── services/                    # Standalone service modules
-│   │   ├── geolocation-service.js   # Coordinate & boundary utilities
-│   │   └── weather-service.js       # Weather API integration
+│   ├── test/                        # node --test suites (npm test)
 │   └── src/
 │       ├── config/
 │       │   └── database.js          # MongoDB connection config
@@ -263,7 +261,7 @@ Before setting up the project, make sure you have the following installed:
 | **Twilio** | SMS OTP authentication | [twilio.com](https://www.twilio.com/) |
 | **Google AI Studio** | Gemini AI API key | [aistudio.google.com](https://aistudio.google.com/) |
 
-> **Note:** For local development, you can set `OTP_MOCK_MODE=true` to bypass Twilio and use a mock OTP code.
+> **Note:** For local development, `OTP_MOCK_MODE=true` skips Twilio and returns the OTP in the send-otp response. Mock mode is refused when `NODE_ENV=production`.
 
 ---
 
@@ -361,7 +359,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Verify installation
-python -c "import numpy; import cv2; from PIL import Image; print('All packages installed successfully!')"
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
 
 # Deactivate when done
 deactivate
@@ -388,7 +386,7 @@ venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
 # Verify installation
-python -c "import numpy; import cv2; from PIL import Image; print('All packages installed successfully!')"
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
 
 # Deactivate when done
 deactivate
@@ -404,7 +402,7 @@ cd cropfarmPY
 python -m venv venv
 venv\Scripts\activate.bat
 pip install -r requirements.txt
-python -c "import numpy; import cv2; from PIL import Image; print('All packages installed successfully!')"
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
 deactivate
 ```
 
@@ -510,14 +508,14 @@ The frontend runs at **http://localhost:3000** by default.
 
 ### Backend (`backend/.env`)
 
-Create this file by copying `.env.example`:
+Create this file by copying `.env.example`, which is the authoritative and complete list of backend settings (including `TRUST_PROXY`, `DEFAULT_SUM_INSURED`, `MAX_RESUBMISSIONS` and `PYTHON_PIPELINE_TIMEOUT_MS`). The most common ones:
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
 | `PORT` | No | Server port (default: 5001) | `5001` |
 | `NODE_ENV` | No | Environment mode | `development` |
-| `MONGODB_URI` | **Yes** | MongoDB Atlas connection string | `mongodb+srv://user:pass@cluster.mongodb.net/agriinsure` |
-| `JWT_SECRET` | **Yes** | Secret key for JWT tokens (min 32 chars) | `your-super-secret-key-here-min-32-chars` |
+| `MONGODB_URI` | **Production** | MongoDB Atlas connection string (without it, development runs on seed data and in-memory claims) | `mongodb+srv://user:pass@cluster.mongodb.net/agriinsure` |
+| `JWT_SECRET` | **Yes** | Secret key for JWT tokens (min 32 chars, enforced in production) | `your-super-secret-key-here-min-32-chars` |
 | `JWT_EXPIRES_IN` | No | Token expiration time | `7d` |
 | `CLOUDINARY_CLOUD_NAME` | **Yes** | Cloudinary cloud name | `your-cloud-name` |
 | `CLOUDINARY_API_KEY` | **Yes** | Cloudinary API key | `123456789012345` |
@@ -527,14 +525,14 @@ Create this file by copying `.env.example`:
 | `TWILIO_PHONE_NUMBER` | **Yes*** | Twilio phone number | `+1234567890` |
 | `GEMINI_API_KEY` | **Yes** | Google Gemini AI API key | `AIzaSy...` |
 | `FRONTEND_URL` | No | Frontend URL for CORS | `http://localhost:3000` |
-| `ALLOWED_ORIGINS` | No | Comma-separated allowed origins | `http://localhost:3000` |
+| `ALLOWED_ORIGINS` | **Production** | Comma-separated allowed origins | `http://localhost:3000` |
 | `PYTHON_COMMAND` | No | Python binary path | `python3` |
 | `WEATHER_API_KEY` | No | Weather API key (Open-Meteo is free) | — |
 | `MAX_FILE_SIZE` | No | Max upload size in bytes | `52428800` (50MB) |
-| `ADMIN_PHONE_NUMBER` | No | Default admin phone | `+917777777777` |
-| `OTP_MOCK_MODE` | No | Skip real SMS, use mock OTP | `true` |
-| `CLAIM_AUTO_APPROVE_THRESHOLD` | No | Auto-approve score threshold | `80` |
-| `CLAIM_REJECT_THRESHOLD` | No | Auto-reject score threshold | `30` |
+| `ADMIN_PHONE_NUMBER` | No | Phone number granted the admin role at login; unset means no admin | `+917777777777` |
+| `OTP_MOCK_MODE` | No | Skip real SMS and return the OTP in the response (refused in production) | `true` |
+| `CLAIM_AUTO_APPROVE_THRESHOLD` | No | Auto-approve confidence threshold (0-1) | `0.7` |
+| `CLAIM_REJECT_THRESHOLD` | No | Auto-reject confidence threshold (0-1) | `0.3` |
 
 > *Twilio variables are optional if `OTP_MOCK_MODE=true`
 
@@ -663,8 +661,8 @@ npm start
 
 | File | Description |
 |------|-------------|
-| `pipeline.py` (root) | 806-line standalone pipeline — EXIF GPS extraction, coordinate matching, geofencing with Shapely, weather cross-reference, PyTorch AI damage classification. Runs in fallback mode without optional deps. |
-| `cropfarmPY/main_pipeline.py` | 410-line RGB vegetation-index pipeline — Excess Green/Red Index analysis, damage percentage scoring, orchestrates all modules |
+| `pipeline.py` (root) | Standalone pipeline, not invoked by the backend — EXIF GPS extraction, coordinate matching, geofencing with Shapely, weather cross-reference, PyTorch AI damage classification. Runs in fallback mode without optional deps. |
+| `cropfarmPY/main_pipeline.py` | RGB vegetation-index pipeline the backend runs; its module docstring documents the stdout JSON contract — Excess Green/Red Index analysis, damage percentage scoring, orchestrates all modules |
 | `cropfarmPY/modules/crop_damage_insurance.py` | Core damage assessment — vegetation indices, coverage calculation |
 | `cropfarmPY/modules/exif_area_calculator.py` | Extracts GPS from EXIF, calculates farm area from photo coordinates |
 | `cropfarmPY/modules/fraud_detector.py` | Detects image manipulation — metadata inconsistencies, copy-move detection |

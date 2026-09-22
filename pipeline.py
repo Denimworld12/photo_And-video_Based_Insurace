@@ -144,13 +144,13 @@ def extract_comprehensive_exif(image_path):
                         exif_data['GPS_Latitude'] = lat_dec
                         exif_data['GPS_Longitude'] = lon_dec
                         exif_data['GPS_Source'] = 'EXIF'
-                        debug(f"✓ Extracted EXIF GPS: {lat_dec:.6f}, {lon_dec:.6f}")
+                        debug(f"Extracted EXIF GPS: {lat_dec:.6f}, {lon_dec:.6f}")
                     else:
-                        debug("✗ EXIF GPS present but could not decode")
+                        debug("EXIF GPS present but could not be decoded")
                 else:
-                    debug(f"✗ No GPS block in EXIF for {os.path.basename(image_path)}")
+                    debug(f"No GPS block in EXIF for {os.path.basename(image_path)}")
             else:
-                debug(f"✗ No EXIF found for {os.path.basename(image_path)}")
+                debug(f"No EXIF found for {os.path.basename(image_path)}")
     except Exception as e:
         debug(f"EXIF extraction error: {e}")
 
@@ -224,7 +224,7 @@ def fetch_real_weather_data(lat, lon, date_iso):
                 data = json.loads(response.read().decode('utf-8'))
                 if 'daily' in data:
                     daily = data['daily']
-                    debug("✓ Weather data fetched successfully")
+                    debug("Weather data fetched successfully")
                     return {
                         'api_success': True,
                         'source': 'open_meteo',
@@ -236,7 +236,7 @@ def fetch_real_weather_data(lat, lon, date_iso):
                         }
                     }
     except Exception as e:
-        debug(f"✗ Weather API error: {e}")
+        debug(f"Weather API error: {e}")
     
     return {
         'api_success': False, 
@@ -319,7 +319,7 @@ def perform_geofencing_analysis(lat, lon, geojson_path, fallback_center=None):
             coords = feature['geometry']['coordinates'][0]
             inside, dist_m = _point_in_polygon_and_distance(lat, lon, coords)
             
-            status = "✓ INSIDE" if inside else f"✗ OUTSIDE ({dist_m:.1f}m away)"
+            status = "INSIDE" if inside else f"OUTSIDE ({dist_m:.1f}m away)"
             debug(f"Geofencing: {status} boundary")
             
             return {
