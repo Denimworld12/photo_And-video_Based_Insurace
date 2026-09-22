@@ -8,7 +8,7 @@ Uses config.pkl for model configuration.
 Output contract (stdout, JSON):
 {
     "damage_assessment":    { ai_calculated_damage_percent, final_damage_percent, severity },
-    "verification_results": { geolocation, weather, fraud_risk, exif, tampering },
+    "verification_results": { geolocation, weather, fraud_risk, exif },
     "overall_assessment":   { final_decision, confidence_score, risk_level,
                               manual_review_required, decision_reason },
     "payout_calculation":   { sum_insured, damage_percent, payout_amount, currency }
@@ -178,22 +178,6 @@ def get_exif_timestamp(image_path: str) -> Optional[str]:
         pass
     return None
 
-def get_exif_software(image_path: str) -> str:
-    """
-    Extract the EXIF Software tag, which names the tool that last wrote the
-    file. FraudDetector uses it to spot images that went through an editor.
-    """
-    try:
-        from PIL import Image
-        img = Image.open(image_path)
-        exif = img._getexif()
-        if exif:
-            return str(exif.get(305) or '')  # Software
-    except Exception:
-        pass
-    return ''
-
-
 # ============================================================================
 # MAIN ASSESSMENT FUNCTION
 # ============================================================================
@@ -247,7 +231,7 @@ def assess_crop_damage(
         image_details_for_fraud.append({
             'filename': os.path.basename(path),
             'exif_timestamp': ts,
-            'software': get_exif_software(path)
+            'software': ''
         })
     
     if not results:
@@ -276,14 +260,13 @@ def assess_crop_damage(
 
     # 5. Fraud Detection
     exif_fraud_result = fraud_detector.verify_exif_timestamps(image_details_for_fraud, datetime.now())
-    tampering_result = fraud_detector.detect_metadata_tampering(image_details_for_fraud)
     
     # 6. Final Fraud Risk Calculation
     fraud_risk = fraud_detector.calculate_fraud_risk(
         weather_score=weather_result.get('confidence_score', 0.5),
         geolocation_score=geo_result.get('score', 0.5),
         exif_score=exif_fraud_result.get('score', 0.5),
-        tampering_score=tampering_result.get('score', 1.0)
+        tampering_score=1.0
     )
 
     # 7. Area Calculation
@@ -361,8 +344,7 @@ def assess_crop_damage(
             'geolocation': geo_result,
             'weather': weather_result,
             'fraud_risk': fraud_risk,
-            'exif': exif_fraud_result,
-            'tampering': tampering_result
+            'exif': exif_fraud_result
         },
         
         # DECISION

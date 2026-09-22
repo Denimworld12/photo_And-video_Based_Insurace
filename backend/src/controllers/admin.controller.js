@@ -18,14 +18,20 @@ const SETTLED_STATUSES = ['payout_complete'];
  * An explicit amount always wins, including an explicit 0. With none supplied
  * the pipeline's own calculated figure is adopted, because a claim routed to
  * manual_review is stored with payoutAmount 0 - approving it without typing an
- * amount would otherwise approve the farmer for nothing. A claim the pipeline
- * never assessed has no figure at all, and null makes the caller ask for one
- * rather than silently settling on zero.
+ * amount would otherwise approve the farmer for nothing.
+ *
+ * A run that failed carries no figure even though it persisted one: its zero is
+ * the stand-in `fallbackResult` records for a claim nothing measured, not a
+ * calculated entitlement. Null in that case makes the caller ask for an amount
+ * rather than silently settling on that zero.
  */
 const resolveApprovedPayout = (claim, requestedAmount) => {
   if (requestedAmount !== undefined) return requestedAmount;
 
-  const calculated = Number(claim.processingResult?.payout_calculation?.payout_amount);
+  const result = claim.processingResult;
+  if (!result || result.pipeline_failed) return null;
+
+  const calculated = Number(result.payout_calculation?.payout_amount);
   return Number.isFinite(calculated) && calculated >= 0 ? calculated : null;
 };
 

@@ -86,14 +86,21 @@ const discardUpload = (filePath) => {
 };
 
 /**
- * Coverage the claim's scheme carries on a policy, or null when no scheme on
- * that policy matches. `claim.scheme` is free text, so guessing at the first
- * scheme of a multi-scheme policy would price the claim against coverage the
- * farmer never chose - an unmatched scheme is unresolved, and the caller logs
- * it and falls back to the documented default.
+ * Coverage the claim's scheme carries on a policy, or null when the policy
+ * cannot say which coverage applies.
+ *
+ * `claim.scheme` is free text and the claim form does not collect it, so a
+ * single-scheme policy answers unambiguously whether or not it is set. Only a
+ * multi-scheme policy with no code match is genuinely unresolved: guessing at
+ * one of several would price the claim against coverage the farmer never chose.
  */
 const schemeMaxAmount = (policy, claim) => {
-  const scheme = policy?.schemes?.find((s) => s.code === claim.scheme);
+  const schemes = policy?.schemes;
+  if (!schemes?.length) return null;
+
+  const matched = claim.scheme ? schemes.find((s) => s.code === claim.scheme) : null;
+  const scheme = matched || (schemes.length === 1 ? schemes[0] : null);
+
   const maxAmount = Number(scheme?.coverage?.maxAmount);
   return Number.isFinite(maxAmount) && maxAmount > 0 ? maxAmount : null;
 };
@@ -115,15 +122,16 @@ const resolveSumInsured = async (claim) => {
   if (!reference) return { sumInsured: fallback, source: 'default' };
 
   let policiesAreSeeded = !isDbConnected();
+  let matchedPolicy = null;
 
   if (isDbConnected()) {
     try {
       const query = mongoose.isValidObjectId(reference)
         ? { _id: reference }
         : { code: String(reference).toUpperCase() };
-      const policy = await Policy.findOne(query);
-      const maxAmount = schemeMaxAmount(policy, claim);
-      if (maxAmount) return { sumInsured: maxAmount, source: `policy:${policy.code}` };
+      matchedPolicy = await Policy.findOne(query);
+      const maxAmount = schemeMaxAmount(matchedPolicy, claim);
+      if (maxAmount) return { sumInsured: maxAmount, source: `policy:${matchedPolicy.code}` };
       policiesAreSeeded = (await Policy.countDocuments({ isActive: true })) === 0;
     } catch (err) {
       console.warn(`[CLAIM] Policy lookup failed for "${reference}":`, err.message);
@@ -136,9 +144,16 @@ const resolveSumInsured = async (claim) => {
     );
     const seedAmount = schemeMaxAmount(seed, claim);
     if (seedAmount) return { sumInsured: seedAmount, source: `seed:${seed.code}` };
+    matchedPolicy = matchedPolicy || seed;
   }
 
-  console.warn(`[CLAIM] No policy matched "${reference}", using default sum insured ${fallback}`);
+  if (matchedPolicy) {
+    console.warn(
+      `[CLAIM] Policy "${matchedPolicy.code}" matched but no scheme on it resolves coverage for scheme "${claim.scheme || ''}", using default sum insured ${fallback}`
+    );
+  } else {
+    console.warn(`[CLAIM] No policy matched "${reference}", using default sum insured ${fallback}`);
+  }
   return { sumInsured: fallback, source: 'default' };
 };
 
@@ -679,4 +694,5 @@ exports.summarizeClaim = async (req, res) => {
 // Exported for tests
 exports._claimCache = claimCache;
 exports._resolveSumInsured = resolveSumInsured;
+exports._schemeMaxAmount = schemeMaxAmount;
 exports._pickCaptureCoordinates = pickCaptureCoordinates;
