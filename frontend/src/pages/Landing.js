@@ -31,8 +31,8 @@ const HOW_IT_WORKS = [
     step: '02',
     Icon: ShieldCheck,
     title: 'The evidence is checked',
-    desc: 'Photo authenticity, GPS location, weather history for that date and damage severity are assessed automatically.',
-    detail: 'Four checks per photo',
+    desc: 'Photo authenticity, GPS location, weather at the field and damage severity are assessed automatically.',
+    detail: 'Four checks per claim',
   },
   {
     step: '03',
@@ -58,7 +58,7 @@ const FRAUD_LAYERS = [
   { Icon: MapPin, label: 'GPS verification', desc: 'Photo location matched to the insured field' },
   { Icon: Camera, label: 'Image analysis', desc: 'Damage type and severity assessed from the photo' },
   { Icon: Eye, label: 'EXIF validation', desc: 'Capture metadata checked for tampering' },
-  { Icon: ShieldCheck, label: 'Cross-reference', desc: 'Weather records for the date and place claimed' },
+  { Icon: ShieldCheck, label: 'Cross-reference', desc: 'Weather at the field location compared with the damage reported' },
 ];
 
 const BENEFITS = [
@@ -198,7 +198,7 @@ export default function Landing() {
             {[
               { value: `${INDIAN_STATES.length}`, label: 'States covered' },
               { value: '5', label: 'Photos per claim' },
-              { value: '4', label: 'Fraud checks per photo' },
+              { value: '4', label: 'Checks per claim' },
               { value: '24/7', label: 'Claim filing' },
             ].map((s) => (
               <div key={s.label} className="px-2 py-6 text-center sm:px-6">
@@ -286,7 +286,7 @@ export default function Landing() {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl">
               <Eyebrow>Verification</Eyebrow>
-              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Four checks on every photo</h2>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Four checks on every claim</h2>
               <p className="mt-4 text-body-lg text-saddle">
                 Each submitted photo passes independent checks before an assessment is produced, so genuine claims
                 move quickly and the rest are caught.
