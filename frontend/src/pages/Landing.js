@@ -15,25 +15,43 @@ const PROMISES = [
   { Icon: Banknote, title: 'Direct payouts', desc: 'Approved claims are paid straight into your bank account.' },
 ];
 
+// These three steps were carried by stock clip-art (a red map pin, a cyan "AI"
+// orb, a stock photograph) — the loudest colour anywhere in the app and the
+// only place saturated red and teal appeared. The step is the content; an icon
+// and the numeral carry it in the same language as the rest of the product.
 const HOW_IT_WORKS = [
   {
     step: '01',
-    img: '/images/gps-capture-icon.jpg',
+    Icon: Camera,
     title: 'Photograph the damage',
-    desc: 'Take GPS-tagged photos of the four corners of your field and the damaged crop.',
+    desc: 'Take GPS-tagged photos of the four corners of your field and the damaged crop, from your phone, standing in the field.',
+    detail: 'Five photos',
   },
   {
     step: '02',
-    img: '/images/ai-verify-icon.jpg',
-    title: 'AI checks the evidence',
-    desc: 'Photo authenticity, location, weather history and damage severity are assessed automatically.',
+    Icon: ShieldCheck,
+    title: 'The evidence is checked',
+    desc: 'Photo authenticity, GPS location, weather history for that date and damage severity are assessed automatically.',
+    detail: 'Four checks per photo',
   },
   {
     step: '03',
-    img: '/images/claim-approval-icon.jpg',
+    Icon: Banknote,
     title: 'Get your payout',
-    desc: 'Approved claims are paid directly to your account, with the full assessment visible to you.',
+    desc: 'Approved claims are paid directly into your bank account, with the full assessment visible to you.',
+    detail: 'Direct to your account',
   },
+];
+
+// What the platform replaces, stated plainly, in place of an AI-generated
+// poster that claimed satellite monitoring and a blockchain network — neither
+// of which exists in this product.
+const COMPARISON = [
+  { stage: 'Reporting the loss', before: 'Paper form at the block office', after: 'Photos from your phone, in the field' },
+  { stage: 'Evidence', before: 'An inspector visits when one is free', after: 'GPS-tagged photos, checked on submission' },
+  { stage: 'Assessment', before: 'Manual survey and a written report', after: 'Automated damage assessment, reviewed by an officer' },
+  { stage: 'Waiting', before: 'Weeks, with no way to check', after: 'Live status at every stage' },
+  { stage: 'Payout', before: 'Cheque, after the file clears', after: 'Direct bank transfer on approval' },
 ];
 
 const FRAUD_LAYERS = [
@@ -239,63 +257,92 @@ export default function Landing() {
               </p>
             </div>
 
-            <ol className="mt-12 grid gap-6 md:grid-cols-3">
+            <ol className="mt-12 grid gap-4 md:grid-cols-3">
               {HOW_IT_WORKS.map((item) => (
-                <li key={item.step} className="overflow-hidden rounded-lg border border-bone bg-parchment">
-                  <img src={item.img} alt="" className="h-40 w-full object-cover" />
-                  <div className="p-5">
-                    <p className="eyebrow">Step {item.step}</p>
-                    <h3 className="mt-1 text-subheading text-ink">{item.title}</h3>
-                    <p className="mt-1 text-body text-bark">{item.desc}</p>
+                <li
+                  key={item.step}
+                  className="flex flex-col rounded-lg border border-bone bg-parchment p-6"
+                >
+                  <div className="flex items-baseline justify-between gap-3 border-b border-bone pb-4">
+                    <span className="text-heading text-honey-amber">{item.step}</span>
+                    <item.Icon className="h-6 w-6 shrink-0 text-saddle" aria-hidden="true" />
                   </div>
+                  <h3 className="mt-4 text-subheading text-ink">{item.title}</h3>
+                  <p className="mt-2 flex-1 text-body text-bark">{item.desc}</p>
+                  <p className="label-micro mt-4">{item.detail}</p>
                 </li>
               ))}
             </ol>
           </div>
         </section>
 
+        {/* This section used to sit beside an AI-generated poster whose own
+            caption read "Agricultural Insurance Technology" and which advertised
+            satellite monitoring and a blockchain network — neither of which this
+            platform has. The four checks it claimed to illustrate are real and
+            are listed here, so the illustration was removed rather than
+            relabelled. */}
         <section className="bg-parchment py-16 sm:py-24">
-          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
-            <div className="order-2 lg:order-1">
-              <img
-                src="/images/ai-fraud-detection-layers.png"
-                alt="Diagram of the platform's layered fraud detection"
-                className="w-full rounded-lg border border-bone"
-              />
-            </div>
-            <div className="order-1 lg:order-2">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
               <Eyebrow>Verification</Eyebrow>
               <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Four checks on every photo</h2>
               <p className="mt-4 text-body-lg text-saddle">
-                Each submitted photo passes through independent checks before an assessment is produced, so genuine
-                claims move quickly and the rest are caught.
+                Each submitted photo passes independent checks before an assessment is produced, so genuine claims
+                move quickly and the rest are caught.
               </p>
-              <ul className="mt-8 grid gap-3 sm:grid-cols-2">
-                {FRAUD_LAYERS.map((item) => (
-                  <li key={item.label} className="rounded-lg border border-bone bg-pure-white p-4">
-                    <item.Icon className="h-5 w-5 text-saddle" aria-hidden="true" />
-                    <p className="mt-2 text-body font-medium text-ink">{item.label}</p>
-                    <p className="text-body text-bark">{item.desc}</p>
-                  </li>
-                ))}
-              </ul>
             </div>
+            <ol className="mt-10 grid gap-px overflow-hidden rounded-lg border border-bone bg-bone sm:grid-cols-2 lg:grid-cols-4">
+              {FRAUD_LAYERS.map((item, i) => (
+                <li key={item.label} className="flex flex-col bg-pure-white p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <item.Icon className="h-5 w-5 shrink-0 text-saddle" aria-hidden="true" />
+                    <span className="label-micro">Check {i + 1}</span>
+                  </div>
+                  <p className="mt-4 text-body-lg font-medium text-ink">{item.label}</p>
+                  <p className="mt-1 text-body text-bark">{item.desc}</p>
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
 
+        {/* The "comparison" here was the same AI poster as the section above,
+            captioned differently. An actual comparison is five rows of text. */}
         <section className="border-y border-bone bg-pure-white py-16 sm:py-24">
-          <div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
-            <Eyebrow>Why it is faster</Eyebrow>
-            <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Traditional assessment versus this one</h2>
-            <p className="mx-auto mt-3 max-w-2xl text-body-lg text-bark">
-              Traditional claim processing waits on a field inspector. The hybrid model assesses the photographs
-              first and reserves the visit for the cases that need one.
-            </p>
-            <img
-              src="/images/traditional-vs-hybrid-model.png"
-              alt="Comparison of the traditional and hybrid claim assessment models"
-              className="mx-auto mt-10 w-full max-w-4xl rounded-lg border border-bone"
-            />
+          <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
+              <Eyebrow>Why it is faster</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">What changes for you</h2>
+              <p className="mt-3 text-body-lg text-bark">
+                Traditional claim processing waits on a field inspector. Photographs are assessed first, and the
+                visit is reserved for the cases that genuinely need one.
+              </p>
+            </div>
+
+            <div className="mt-10 overflow-hidden rounded-lg border border-bone">
+              <div className="hidden grid-cols-[1fr_1fr_1fr] gap-px bg-bone sm:grid">
+                <p className="label-micro bg-parchment px-5 py-3">Stage</p>
+                <p className="label-micro bg-parchment px-5 py-3">Traditional</p>
+                <p className="label-micro bg-honey-amber/20 px-5 py-3 text-saddle">With PBI AgriInsure</p>
+              </div>
+
+              <dl className="grid gap-px bg-bone">
+                {COMPARISON.map((row) => (
+                  <div key={row.stage} className="grid gap-px bg-bone sm:grid-cols-[1fr_1fr_1fr]">
+                    <dt className="bg-parchment px-5 py-4 text-body font-medium text-ink">{row.stage}</dt>
+                    <dd className="bg-pure-white px-5 py-4 text-body text-bark">
+                      <span className="label-micro mb-1 block sm:hidden">Traditional</span>
+                      {row.before}
+                    </dd>
+                    <dd className="bg-honey-amber/10 px-5 py-4 text-body text-ink">
+                      <span className="label-micro mb-1 block sm:hidden">With PBI AgriInsure</span>
+                      {row.after}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
           </div>
         </section>
 
@@ -342,11 +389,38 @@ export default function Landing() {
                 <Leaf className="h-4 w-4" aria-hidden="true" /> Try it now
               </button>
             </div>
-            <img
-              src="/images/dashboard-preview.png"
-              alt="The farmer dashboard showing claims and their status"
-              className="w-full rounded-lg border border-bone"
-            />
+            {/* The screenshot that sat here was of the pre-redesign dashboard —
+                saturated blue buttons, drop shadows, the lot — so it advertised
+                a product that no longer exists. A small honest representation
+                built from the real design system replaces it. */}
+            <div className="rounded-lg border border-bone bg-parchment p-5">
+              <p className="label-micro">Claim CLM-M8K2-A7X9Q</p>
+              <p className="mt-1 text-subheading text-ink">Wheat · 5.5 acres · Punjab</p>
+
+              <dl className="mt-5 grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Status', value: 'Under review' },
+                  { label: 'Damage assessed', value: '41.2%' },
+                  { label: 'AI confidence', value: '62.0%' },
+                  { label: 'Suggested payout', value: '₹48,500' },
+                ].map((d) => (
+                  <div key={d.label} className="rounded-md border border-bone bg-pure-white p-3">
+                    <dt className="label-micro">{d.label}</dt>
+                    <dd className="mt-0.5 text-body-lg font-medium text-ink">{d.value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="mt-5 border-t border-bone pt-4">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="label-micro">Evidence</span>
+                  <span className="text-body text-bark">5 of 5 photos</span>
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-md bg-bone">
+                  <div className="h-full w-full rounded-md bg-honey-amber" />
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 

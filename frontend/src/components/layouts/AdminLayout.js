@@ -15,6 +15,16 @@ const navItems = [
 
 const footerLinks = [{ to: '/dashboard', label: 'Farmer View', icon: ExternalLink }];
 
+// The admin portal previously had no quick navigation on a phone at all: every
+// move went through the hamburger, while the farmer portal had a tab bar. An
+// administrator triaging claims on the move gets the same four-destination bar.
+const bottomNav = [
+  { to: '/admin', label: 'Dashboard', short: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/admin/claims', label: 'Claim Verification', short: 'Claims', icon: ClipboardCheck },
+  { to: '/admin/users', label: 'User Management', short: 'Farmers', icon: Users },
+  { to: '/admin/policies', label: 'Policy Management', short: 'Policies', icon: FileText },
+];
+
 export default function AdminLayout() {
   const { user } = useAuth();
 
@@ -24,6 +34,7 @@ export default function AdminLayout() {
       brandSubtitle="PBI AgriInsure"
       navItems={navItems}
       footerLinks={footerLinks}
+      bottomNav={bottomNav}
       identity={{
         name: user?.fullName || 'Administrator',
         detail: user?.phoneNumber ? `+91 ${user.phoneNumber}` : 'No number on file',

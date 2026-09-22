@@ -54,11 +54,18 @@ export default function PortalLayout({
     navigate('/');
   };
 
+  /**
+   * One active-state language for every nav surface in both portals: a
+   * honey-amber marker, ink text and medium weight. The sidebar wears it as a
+   * filled row with a leading rule, the phone tab bar as a rule along the top
+   * edge — the same signal in the shape each surface allows, rather than the
+   * amber fill in one place and a bare colour shift in the other.
+   */
   const navLinkClass = ({ isActive }) =>
-    `flex items-center gap-3 rounded-md px-3 py-2.5 text-body transition-colors ${
+    `flex items-center gap-3 rounded-md border-l-2 py-2.5 pl-2.5 pr-3 text-body transition-colors ${
       isActive
-        ? 'bg-honey-amber/25 font-medium text-ink'
-        : 'text-saddle hover:bg-parchment hover:text-ink'
+        ? 'border-honey-amber bg-honey-amber/25 font-medium text-ink'
+        : 'border-transparent text-saddle hover:bg-parchment hover:text-ink'
     }`;
 
   const sidebar = (
@@ -206,8 +213,10 @@ export default function PortalLayout({
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 py-2 text-caption ${
-                  isActive ? 'text-ink' : 'text-bark'
+                `flex min-h-14 flex-col items-center justify-center gap-0.5 border-t-2 px-1 py-2 text-caption transition-colors ${
+                  isActive
+                    ? 'border-honey-amber bg-honey-amber/15 font-medium text-ink'
+                    : 'border-transparent text-bark'
                 }`
               }
             >
@@ -217,7 +226,7 @@ export default function PortalLayout({
                     className={`h-5 w-5 ${isActive ? 'text-ink' : 'text-bark'}`}
                     aria-hidden="true"
                   />
-                  <span className={isActive ? 'font-medium' : ''}>{item.short || item.label}</span>
+                  <span>{item.short || item.label}</span>
                 </>
               )}
             </NavLink>
