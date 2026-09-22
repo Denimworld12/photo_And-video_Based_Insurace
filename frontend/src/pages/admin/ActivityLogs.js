@@ -1,115 +1,135 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../utils/api';
+import PageHeader from '../../components/ui/PageHeader';
+import Pagination from '../../components/ui/Pagination';
+import { ErrorState, EmptyState, SkeletonList } from '../../components/ui/States';
 import {
-  Activity, CheckCircle2, XCircle, FileText, Edit3,
-  Trash2, UserCog, LogIn, ChevronLeft, ChevronRight
+  Activity, CheckCircle2, XCircle, FileText, Edit3, Trash2, UserCog, LogIn,
 } from 'lucide-react';
 
-const ACTION_CONFIG = {
-  approve_claim: { label: 'Approved Claim', Icon: CheckCircle2, color: 'text-success' },
-  reject_claim: { label: 'Rejected Claim', Icon: XCircle, color: 'text-error' },
-  create_policy: { label: 'Created Policy', Icon: FileText, color: 'text-info' },
-  update_policy: { label: 'Updated Policy', Icon: Edit3, color: 'text-warning' },
-  delete_policy: { label: 'Deleted Policy', Icon: Trash2, color: 'text-error' },
-  toggle_user: { label: 'Toggled User', Icon: UserCog, color: 'text-secondary' },
-  login: { label: 'Admin Login', Icon: LogIn, color: 'text-base-content/60' },
+const ACTION = {
+  approve_claim: { label: 'Approved a claim', Icon: CheckCircle2 },
+  reject_claim: { label: 'Rejected a claim', Icon: XCircle },
+  create_policy: { label: 'Created a policy', Icon: FileText },
+  update_policy: { label: 'Updated a policy', Icon: Edit3 },
+  delete_policy: { label: 'Deleted a policy', Icon: Trash2 },
+  toggle_user: { label: 'Changed an account status', Icon: UserCog },
+  login: { label: 'Signed in', Icon: LogIn },
 };
+
+/** Renders a details payload as readable rows instead of a wall of JSON. */
+function LogDetails({ details }) {
+  if (!details) return null;
+
+  if (typeof details === 'string') {
+    return <p className="mt-2 rounded-md border border-bone bg-parchment px-3 py-2 text-body text-saddle">{details}</p>;
+  }
+
+  const entries = Object.entries(details).filter(([, v]) => v !== null && v !== undefined && v !== '');
+  if (entries.length === 0) return null;
+
+  return (
+    <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-md border border-bone bg-parchment px-3 py-2 sm:grid-cols-2">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex items-baseline justify-between gap-3">
+          <dt className="label-micro">{key.replace(/[-_]/g, ' ')}</dt>
+          <dd className="min-w-0 truncate text-body text-saddle">
+            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export default function ActivityLogs() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => { fetchLogs(); }, [page]); // eslint-disable-line
-
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data } = await api.get('/api/admin/activity-logs', { params: { page, limit: 20 } });
-      if (data.success) { setLogs(data.logs || []); setTotalPages(data.totalPages || 1); }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  };
+      if (!data.success) throw new Error(data.error || 'The activity log could not be read.');
+      setLogs(data.logs || []);
+      setTotalPages(data.totalPages || 1);
+    } catch (err) {
+      // An audit trail that silently renders as empty on failure is worse than
+      // no audit trail — it reads as "nothing happened".
+      setError(err.response?.data?.error || err.message || 'The activity log could not be loaded.');
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
 
   const fmt = (d) => {
     const date = new Date(d);
-    return `${date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} ${date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+    return `${date.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })} at ${date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-base-content flex items-center gap-2">
-          <Activity className="w-6 h-6 text-secondary" /> Activity Logs
-        </h1>
-        <p className="text-sm text-base-content/50 mt-1">Audit trail of all admin actions</p>
-      </div>
+    <div className="page-shell space-y-6">
+      <PageHeader
+        eyebrow="Administration"
+        title="Activity log"
+        description="Every action taken from the admin portal, newest first."
+      />
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <span className="loading loading-spinner loading-lg text-secondary" />
-        </div>
+        <SkeletonList rows={6} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={fetchLogs} />
       ) : logs.length === 0 ? (
-        <div className="text-center py-16">
-          <Activity className="w-12 h-12 text-base-content/20 mx-auto mb-3" />
-          <h3 className="font-medium text-base-content">No activity yet</h3>
-          <p className="text-sm text-base-content/40 mt-1">Admin actions will appear here</p>
-        </div>
+        <EmptyState
+          icon={Activity}
+          title="No activity recorded"
+          message="Approvals, rejections, policy edits and account changes are logged here."
+        />
       ) : (
-        <>
-          <div className="space-y-2">
+        <div className="overflow-hidden rounded-lg border border-bone bg-pure-white">
+          <ol className="divide-y divide-bone">
             {logs.map((log) => {
-              const ac = ACTION_CONFIG[log.action] || { label: log.action, Icon: Activity, color: 'text-base-content/60' };
-              const ActionIcon = ac.Icon;
+              const meta = ACTION[log.action] || { label: (log.action || '').replace(/[-_]/g, ' '), Icon: Activity };
               return (
-                <div key={log._id} className="card bg-base-100 shadow-sm border border-base-200">
-                  <div className="card-body p-4 flex-row items-start gap-4">
-                    <div className={`p-2 rounded-lg bg-base-200 ${ac.color} flex-shrink-0`}>
-                      <ActionIcon className="w-5 h-5" />
+                <li key={log._id} className="flex items-start gap-4 p-4">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-parchment">
+                    <meta.Icon className="h-4 w-4 text-saddle" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="text-body font-medium capitalize text-ink">{meta.label}</p>
+                      <time className="text-caption text-bark">{fmt(log.createdAt)}</time>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className={`text-sm font-medium ${ac.color}`}>{ac.label}</p>
-                          {log.targetType && (
-                            <p className="text-xs text-base-content/40 mt-0.5">
-                              {log.targetType}: <span className="font-mono">{log.targetId || '—'}</span>
-                            </p>
-                          )}
-                        </div>
-                        <span className="text-xs text-base-content/40 flex-shrink-0">{fmt(log.createdAt)}</span>
-                      </div>
-                      {log.details && (
-                        <p className="text-xs text-base-content/50 mt-2 bg-base-200 p-2 rounded-lg">
-                          {typeof log.details === 'string' ? log.details : JSON.stringify(log.details)}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-base-content/30">
-                        {log.adminId?.phoneNumber && <span>Admin: {log.adminId.phoneNumber}</span>}
-                        {log.ipAddress && <span>IP: {log.ipAddress}</span>}
-                      </div>
-                    </div>
+                    {log.targetType && (
+                      <p className="text-caption text-bark">
+                        {log.targetType}: <span className="font-mono">{log.targetId || '—'}</span>
+                      </p>
+                    )}
+                    <LogDetails details={log.details} />
+                    <p className="mt-2 flex flex-wrap gap-x-4 text-caption text-bark">
+                      {log.adminId?.phoneNumber && <span>By {log.adminId.phoneNumber}</span>}
+                      {log.ipAddress && <span>From {log.ipAddress}</span>}
+                    </p>
                   </div>
-                </div>
+                </li>
               );
             })}
-          </div>
-
-          {totalPages > 1 && (
-            <div className="flex justify-center">
-              <div className="join">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="join-item btn btn-sm">
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button className="join-item btn btn-sm">Page {page} of {totalPages}</button>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="join-item btn btn-sm">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </>
+          </ol>
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </div>
       )}
     </div>
   );

@@ -1,385 +1,673 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../utils/api';
+import PageHeader from '../../components/ui/PageHeader';
+import Modal from '../../components/ui/Modal';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import StatusBadge from '../../components/ui/StatusBadge';
+import Pagination from '../../components/ui/Pagination';
+import { Meter } from '../../components/ui/StatTile';
+import { TextField, TextAreaField } from '../../components/ui/Field';
+import { ErrorState, EmptyState, SkeletonList } from '../../components/ui/States';
+import { useToast } from '../../components/ui/Toast';
 import {
   ClipboardCheck, Search, Loader2, Eye, CheckCircle2, XCircle,
-  X, ChevronLeft, ChevronRight, MapPin, Camera, AlertTriangle, Banknote
+  MapPin, Camera, AlertTriangle, Banknote,
 } from 'lucide-react';
 
 const STATUS_FILTERS = [
-  { key: 'all', label: 'All Claims' },
-  { key: 'manual_review', label: 'Manual Review' },
+  { key: 'all', label: 'All' },
+  { key: 'manual_review', label: 'Manual review' },
   { key: 'submitted', label: 'Submitted' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
-  { key: 'payout_pending', label: 'Payout Pending' },
+  { key: 'payout_pending', label: 'Payout pending' },
 ];
 
-const statusBadge = (s) => ({
-  approved: 'badge-success', rejected: 'badge-error', processing: 'badge-warning',
-  submitted: 'badge-info', manual_review: 'badge-warning', 'manual-review': 'badge-warning',
-  payout_pending: 'badge-accent', payout_complete: 'badge-success', draft: 'badge-ghost',
-}[s] || 'badge-ghost');
+const NEEDS_REVIEW = ['submitted', 'processing', 'manual_review', 'manual-review'];
 
 export default function ClaimVerification() {
+  const toast = useToast();
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
+
   const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({ status: '', payoutAmount: '', reviewNotes: '' });
+  const [reviewErrors, setReviewErrors] = useState({});
 
   const fetchClaims = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const params = { page, limit: 15 };
       if (filter !== 'all') params.status = filter;
-      if (search) params.search = search;
+      if (appliedSearch) params.search = appliedSearch;
       const { data } = await api.get('/api/admin/claims', { params });
-      if (data.success) { setClaims(data.claims || []); setPagination(data.pagination || { total: 0, pages: 1 }); }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  }, [filter, page, search]);
+      if (!data.success) throw new Error(data.error || 'The claim list could not be read.');
+      setClaims(data.claims || []);
+      setPagination(data.pagination || { total: 0, pages: 1 });
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'The claim list could not be loaded.');
+      setClaims([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, page, appliedSearch]);
 
-  useEffect(() => { fetchClaims(); }, [fetchClaims]);
+  useEffect(() => {
+    fetchClaims();
+  }, [fetchClaims]);
 
-  const handleSearchSubmit = (e) => { e.preventDefault(); setPage(1); fetchClaims(); };
+  const suggestedPayout = (claim) => claim?.processingResult?.payout_calculation?.final_payout_amount ?? null;
 
   const openDetail = async (id) => {
     try {
+      setDetailLoading(true);
       const { data } = await api.get(`/api/admin/claims/${id}`);
-      if (data.success) { setSelected(data.claim); setReviewForm({ status: '', payoutAmount: '', reviewNotes: '' }); }
-    } catch { alert('Failed to load claim detail'); }
+      if (data.success) {
+        setSelected(data.claim);
+        // Pre-fill the amount the pipeline calculated, so approving at the
+        // suggested figure is one click and any departure from it is deliberate.
+        const suggested = suggestedPayout(data.claim);
+        setReviewForm({ status: '', payoutAmount: suggested != null ? String(suggested) : '', reviewNotes: '' });
+        setReviewErrors({});
+      } else {
+        toast.error('That claim could not be opened.');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'That claim could not be opened.');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const validateReview = () => {
+    const errs = {};
+    if (!reviewForm.status) errs.status = 'Choose approve or reject first';
+    if (reviewForm.status === 'approved') {
+      const amount = parseFloat(reviewForm.payoutAmount);
+      // Approving used to omit a blank amount from the payload entirely, so a
+      // claim could be approved for an unstated sum without any warning.
+      if (!reviewForm.payoutAmount.trim()) errs.payoutAmount = 'Enter the amount to pay this farmer';
+      else if (Number.isNaN(amount) || amount < 0) errs.payoutAmount = 'Enter a valid amount in rupees';
+    }
+    if (reviewForm.status === 'rejected' && !reviewForm.reviewNotes.trim())
+      errs.reviewNotes = 'The farmer sees this reason and needs it to resubmit';
+    setReviewErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const requestReview = () => {
+    if (validateReview()) setConfirmOpen(true);
   };
 
   const submitReview = async () => {
-    if (!reviewForm.status) return alert('Select Approve or Reject');
     try {
       setReviewing(true);
       const payload = { status: reviewForm.status, reviewNotes: reviewForm.reviewNotes };
-      if (reviewForm.status === 'approved' && reviewForm.payoutAmount) payload.payoutAmount = parseFloat(reviewForm.payoutAmount);
+      if (reviewForm.status === 'approved') payload.payoutAmount = parseFloat(reviewForm.payoutAmount);
+
       const { data } = await api.patch(`/api/admin/claims/${selected._id}/review`, payload);
       if (data.success) {
-        setClaims(prev => prev.map(c => c._id === selected._id ? { ...c, status: reviewForm.status } : c));
+        setClaims((prev) => prev.map((c) => (c._id === selected._id ? { ...c, status: reviewForm.status } : c)));
+        const farmer = selected.userId?.fullName || selected.userId?.phoneNumber || 'the farmer';
+        toast.success(
+          reviewForm.status === 'approved'
+            ? `Claim approved. ₹${parseFloat(reviewForm.payoutAmount).toLocaleString('en-IN')} queued for ${farmer}.`
+            : `Claim rejected. ${farmer} has been told why and can resubmit.`
+        );
+        setConfirmOpen(false);
         setSelected(null);
+      } else {
+        toast.error(data.error || 'The decision was not saved. Nothing has changed.');
+        setConfirmOpen(false);
       }
-    } catch (err) { alert(err.response?.data?.error || 'Review failed'); }
-    finally { setReviewing(false); }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'The decision was not saved. Nothing has changed.');
+      setConfirmOpen(false);
+    } finally {
+      setReviewing(false);
+    }
   };
 
-  const fmt = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-  const getConfidence = (claim) => ((claim.confidenceScore || claim.processingResult?.overall_assessment?.confidence_score || 0) * 100).toFixed(1);
-  const needsReview = (status) => ['submitted', 'processing', 'manual_review', 'manual-review'].includes(status);
+  const fmt = (d) =>
+    d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const confidenceOf = (c) =>
+    (c.confidenceScore || c.processingResult?.overall_assessment?.confidence_score || 0) * 100;
+  const needsReview = (status) => NEEDS_REVIEW.includes(status);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setPage(1);
+    setAppliedSearch(search.trim());
+  };
+
+  return (
+    <div className="page-shell space-y-6">
+      <PageHeader
+        eyebrow="Administration"
+        title="Claim verification"
+        description="Review the AI assessment, then approve a payout or reject with a reason."
+      />
+
+      <form onSubmit={handleSearch} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="flex-1 sm:max-w-md">
+          <TextField
+            label="Search claims"
+            icon={Search}
+            type="search"
+            placeholder="Claim ID or crop"
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
+        <button type="submit" className="btn btn-primary">
+          Search
+        </button>
+        {appliedSearch && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setAppliedSearch('');
+              setPage(1);
+            }}
+            className="btn btn-outline"
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
+      <div
+        role="group"
+        aria-label="Filter by status"
+        className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
+      >
+        {STATUS_FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                setFilter(f.key);
+                setPage(1);
+              }}
+              className={`shrink-0 rounded-md border px-3 py-1.5 text-body transition-colors ${
+                active
+                  ? 'border-honey-amber bg-honey-amber/25 font-medium text-ink'
+                  : 'border-bone bg-pure-white text-saddle hover:border-loam'
+              }`}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {loading ? (
+        <SkeletonList rows={5} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={fetchClaims} />
+      ) : claims.length === 0 ? (
+        <EmptyState
+          icon={ClipboardCheck}
+          title={appliedSearch ? `No claim matches “${appliedSearch}”` : 'No claims to show'}
+          message={
+            appliedSearch
+              ? 'Try a claim ID, or clear the search.'
+              : filter === 'all'
+                ? 'Claims appear here as farmers file them.'
+                : 'No claim currently has this status.'
+          }
+          action={
+            filter !== 'all' && !appliedSearch ? (
+              <button type="button" onClick={() => setFilter('all')} className="btn btn-outline">
+                Show all claims
+              </button>
+            ) : null
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-bone bg-pure-white">
+          {/* Eight columns are unreadable below a laptop; the same record reads
+              as a card on a phone and a tablet. */}
+          <ul className="divide-y divide-bone xl:hidden">
+            {claims.map((c) => (
+              <li key={c._id} className="space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-caption text-bark">{c.documentId}</p>
+                    <p className="mt-0.5 text-body-lg font-medium capitalize text-ink">{c.cropType || 'Crop claim'}</p>
+                    <p className="text-body text-bark">
+                      {c.user?.fullName || c.user?.phoneNumber || 'Unknown farmer'}
+                    </p>
+                  </div>
+                  <StatusBadge status={c.status} />
+                </div>
+                <Meter
+                  label="AI confidence"
+                  value={confidenceOf(c)}
+                  caption={`${confidenceOf(c).toFixed(1)}%`}
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-caption capitalize text-bark">
+                    {c.lossReason || 'Cause not given'} · {fmt(c.submittedAt || c.createdAt)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => openDetail(c._id)}
+                    className={needsReview(c.status) ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+                  >
+                    <Eye className="h-4 w-4" aria-hidden="true" /> {needsReview(c.status) ? 'Review' : 'View'}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <table className="hidden w-full xl:table">
+            <thead>
+              <tr className="border-b border-bone text-left">
+                {['Claim ID', 'Farmer', 'Crop', 'Cause', 'Confidence', 'Status', 'Filed', ''].map((h, i) => (
+                  <th
+                    key={h || i}
+                    className="px-4 py-3 label-micro font-medium"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-bone">
+              {claims.map((c) => (
+                <tr key={c._id} className="transition-colors hover:bg-parchment">
+                  <td className="px-4 py-3 font-mono text-caption text-saddle">{c.documentId}</td>
+                  <td className="px-4 py-3">
+                    <p className="text-body text-ink">{c.user?.fullName || '—'}</p>
+                    <p className="text-caption text-bark">{c.user?.phoneNumber || '—'}</p>
+                  </td>
+                  <td className="px-4 py-3 text-body capitalize text-ink">{c.cropType || '—'}</td>
+                  <td className="px-4 py-3 text-body capitalize text-bark">{c.lossReason || '—'}</td>
+                  <td className="w-40 px-4 py-3">
+                    <Meter label="" value={confidenceOf(c)} caption={`${confidenceOf(c).toFixed(0)}%`} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={c.status} />
+                  </td>
+                  <td className="px-4 py-3 text-caption text-bark">{fmt(c.submittedAt || c.createdAt)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openDetail(c._id)}
+                      className={needsReview(c.status) ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+                    >
+                      <Eye className="h-4 w-4" aria-hidden="true" /> {needsReview(c.status) ? 'Review' : 'View'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <Pagination page={page} totalPages={pagination.pages} onChange={setPage} total={pagination.total} />
+        </div>
+      )}
+
+      {detailLoading && (
+        <p role="status" className="flex items-center gap-2 text-body text-bark">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Opening claim…
+        </p>
+      )}
+
+      <Modal
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        title="Claim detail"
+        subtitle={selected?.documentId}
+        size="lg"
+      >
+        {selected && <ClaimDetail
+          claim={selected}
+          reviewForm={reviewForm}
+          reviewErrors={reviewErrors}
+          setReviewForm={setReviewForm}
+          setReviewErrors={setReviewErrors}
+          onSubmit={requestReview}
+          reviewing={reviewing}
+          needsReview={needsReview(selected.status)}
+          suggested={suggestedPayout(selected)}
+          fmt={fmt}
+        />}
+      </Modal>
+
+      {/* Approving moves public money to a farmer and rejecting blocks it.
+          Both used to fire straight from the form with no summary of the
+          decision and no confirmation that it had been recorded. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        busy={reviewing}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={submitReview}
+        tone={reviewForm.status === 'rejected' ? 'danger' : 'primary'}
+        title={reviewForm.status === 'approved' ? 'Approve this claim?' : 'Reject this claim?'}
+        description={
+          reviewForm.status === 'approved'
+            ? 'The farmer is notified and the payout is queued for disbursement.'
+            : 'The farmer is notified with the reason below and may resubmit with new evidence.'
+        }
+        summary={
+          selected
+            ? [
+                { label: 'Claim', value: selected.documentId },
+                {
+                  label: 'Farmer',
+                  value: selected.userId?.fullName || selected.userId?.phoneNumber || '—',
+                },
+                ...(reviewForm.status === 'approved'
+                  ? [
+                      {
+                        label: 'Payout',
+                        value: `₹${(parseFloat(reviewForm.payoutAmount) || 0).toLocaleString('en-IN')}`,
+                      },
+                    ]
+                  : [{ label: 'Reason', value: reviewForm.reviewNotes }]),
+              ]
+            : []
+        }
+        confirmLabel={reviewForm.status === 'approved' ? 'Approve and queue payout' : 'Reject claim'}
+      />
+    </div>
+  );
+}
+
+/** Kept at module scope so typing in the review notes does not remount the form. */
+function ClaimDetail({
+  claim,
+  reviewForm,
+  reviewErrors,
+  setReviewForm,
+  setReviewErrors,
+  onSubmit,
+  reviewing,
+  needsReview,
+  suggested,
+  fmt,
+}) {
+  const confidence =
+    (claim.confidenceScore || claim.processingResult?.overall_assessment?.confidence_score || 0) * 100;
+  const damage =
+    claim.processingResult?.damage_assessment?.final_damage_percent ??
+    claim.processingResult?.overall_assessment?.damage_percentage;
+  const aiDecision =
+    claim.processingResult?.decision?.decision || claim.processingResult?.overall_assessment?.final_decision;
+  const evidence = claim.uploadedImages || [];
+
+  const setField = (key, value) => {
+    setReviewForm((prev) => ({ ...prev, [key]: value }));
+    setReviewErrors((prev) => ({ ...prev, [key]: '' }));
+  };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-base-content flex items-center gap-2">
-          <ClipboardCheck className="w-6 h-6 text-secondary" /> Claim Verification
-        </h1>
-        <p className="text-sm text-base-content/50 mt-1">Review, approve or reject insurance claims</p>
-      </div>
-
-      {/* Search */}
-      <form onSubmit={handleSearchSubmit} className="flex gap-3">
-        <label className="input input-bordered flex items-center gap-2 flex-1">
-          <Search className="w-4 h-4 text-base-content/40" />
-          <input type="text" className="grow" placeholder="Search by claim ID or crop type..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        <button type="submit" className="btn btn-secondary btn-sm">Search</button>
-      </form>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        {STATUS_FILTERS.map(f => (
-          <button key={f.key} onClick={() => { setFilter(f.key); setPage(1); }}
-            className={`btn btn-sm ${filter === f.key ? 'btn-secondary' : 'btn-ghost bg-base-200'}`}>
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Modal */}
-      {selected && (
-        <dialog className="modal modal-open">
-          <div className="modal-box max-w-3xl max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-bold">Claim Detail</h2>
-                <p className="text-xs text-base-content/40 font-mono">{selected.documentId}</p>
-              </div>
-              <button onClick={() => setSelected(null)} className="btn btn-ghost btn-sm btn-circle">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Status grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              {[
-                { label: 'Status', value: <span className={`badge badge-sm ${statusBadge(selected.status)}`}>{(selected.status || '').replace(/_/g, ' ')}</span> },
-                { label: 'Farmer', value: selected.userId?.fullName || selected.userId?.phoneNumber || '—' },
-                { label: 'Submitted', value: fmt(selected.submittedAt || selected.createdAt) },
-                { label: 'Resubmission', value: selected.resubmissionCount ? `#${selected.resubmissionCount}` : 'Original' },
-              ].map(item => (
-                <div key={item.label} className="bg-base-200 rounded-xl p-3">
-                  <p className="text-xs text-base-content/40 mb-1">{item.label}</p>
-                  <div className="text-sm font-medium">{item.value}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Claim Info */}
-            <h3 className="font-semibold text-base-content mb-3 text-sm">Claim Information</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm mb-4">
-              {[
-                { label: 'Crop Type', value: selected.cropType },
-                { label: 'Farm Area', value: selected.farmArea ? `${selected.farmArea} acres` : '—' },
-                { label: 'Loss Reason', value: selected.lossReason },
-                { label: 'State', value: selected.state },
-                { label: 'Season', value: selected.season },
-                { label: 'Insurance No.', value: selected.insuranceNumber, mono: true },
-              ].map(item => (
-                <div key={item.label}>
-                  <span className="text-base-content/40 text-xs block">{item.label}</span>
-                  <span className={`font-medium ${item.mono ? 'font-mono text-xs' : ''}`}>{item.value || '—'}</span>
-                </div>
-              ))}
-            </div>
-            {selected.lossDescription && (
-              <div className="mb-6">
-                <span className="text-base-content/40 text-xs block mb-1">Loss Description</span>
-                <p className="text-sm bg-base-200 p-3 rounded-lg">{selected.lossDescription}</p>
-              </div>
-            )}
-
-            {/* AI Analysis */}
-            {selected.processingResult && (
-              <div className="bg-secondary/5 rounded-xl p-4 border border-secondary/20 mb-6">
-                <h3 className="font-semibold text-secondary mb-3 text-sm flex items-center gap-2">
-                  <Eye className="w-4 h-4" /> AI Analysis Result
-                </h3>
-                <div className="stats stats-vertical sm:stats-horizontal w-full bg-base-100">
-                  <div className="stat py-2 px-3">
-                    <div className="stat-title text-xs">Confidence</div>
-                    <div className="stat-value text-lg text-secondary">
-                      {((selected.confidenceScore || selected.processingResult?.overall_assessment?.confidence_score || 0) * 100).toFixed(1)}%
-                    </div>
-                  </div>
-                  <div className="stat py-2 px-3">
-                    <div className="stat-title text-xs">Damage</div>
-                    <div className="stat-value text-lg">
-                      {selected.processingResult?.damage_assessment?.final_damage_percent?.toFixed(1) || selected.processingResult?.overall_assessment?.damage_percentage?.toFixed(1) || '—'}%
-                    </div>
-                  </div>
-                  <div className="stat py-2 px-3">
-                    <div className="stat-title text-xs">AI Decision</div>
-                    <div className={`stat-value text-lg ${
-                      (selected.processingResult?.decision?.decision || selected.processingResult?.overall_assessment?.final_decision) === 'APPROVE' ? 'text-success' :
-                      (selected.processingResult?.decision?.decision || selected.processingResult?.overall_assessment?.final_decision) === 'REJECT' ? 'text-error' : 'text-warning'
-                    }`}>
-                      {selected.processingResult?.decision?.decision || selected.processingResult?.overall_assessment?.final_decision || '—'}
-                    </div>
-                  </div>
-                  <div className="stat py-2 px-3">
-                    <div className="stat-title text-xs">Suggested Payout</div>
-                    <div className="stat-value text-lg">
-                      {selected.processingResult?.payout_calculation?.final_payout_amount
-                        ? `₹${selected.processingResult.payout_calculation.final_payout_amount.toLocaleString('en-IN')}`
-                        : '—'}
-                    </div>
-                  </div>
-                </div>
-                {selected.processingResult?.verification_evidence && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {[
-                      { label: 'Authenticity', ok: selected.processingResult.verification_evidence.authenticity_verified },
-                      { label: 'Location', ok: selected.processingResult.verification_evidence.location_verified },
-                      { label: 'Weather', ok: selected.processingResult.verification_evidence.weather_verified },
-                    ].map(v => (
-                      <span key={v.label} className={`badge badge-sm gap-1 ${v.ok ? 'badge-success' : 'badge-error'}`}>
-                        {v.ok ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />} {v.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Evidence Photos */}
-            {selected.uploadedImages?.length > 0 && (
-              <div className="mb-6">
-                <h3 className="font-semibold text-base-content mb-3 text-sm flex items-center gap-2">
-                  <Camera className="w-4 h-4" /> Evidence Photos ({selected.uploadedImages.length})
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {selected.uploadedImages.map((img, i) => (
-                    <div key={i} className="relative aspect-video bg-base-200 rounded-xl overflow-hidden border border-base-300">
-                      {img.cloudinaryUrl ? (
-                        <img src={img.cloudinaryUrl} alt={img.stepId || `Evidence ${i + 1}`} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-base-content/30 text-sm">{img.stepId || `Image ${i + 1}`}</div>
-                      )}
-                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                        <p className="text-white text-xs font-medium">{img.stepId || `Step ${i + 1}`}</p>
-                        {img.coordinates?.lat && (
-                          <p className="text-white/70 text-[10px] flex items-center gap-0.5">
-                            <MapPin className="w-2 h-2" />{img.coordinates.lat.toFixed(4)}, {img.coordinates.lon.toFixed(4)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Previous rejection */}
-            {selected.rejectionReason && selected.status !== 'rejected' && (
-              <div className="alert alert-warning mb-6">
-                <AlertTriangle className="w-4 h-4" />
-                <div><p className="font-bold text-xs">Previously Rejected</p><p className="text-sm">{selected.rejectionReason}</p></div>
-              </div>
-            )}
-
-            {/* Review Form */}
-            {needsReview(selected.status) && (
-              <div className="border-t border-base-300 pt-5 space-y-4">
-                <h3 className="font-semibold text-base-content">Admin Review Decision</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setReviewForm(p => ({ ...p, status: 'approved' }))}
-                    className={`btn gap-2 ${reviewForm.status === 'approved' ? 'btn-success' : 'btn-outline btn-success'}`}>
-                    <CheckCircle2 className="w-5 h-5" /> Approve
-                  </button>
-                  <button onClick={() => setReviewForm(p => ({ ...p, status: 'rejected' }))}
-                    className={`btn gap-2 ${reviewForm.status === 'rejected' ? 'btn-error' : 'btn-outline btn-error'}`}>
-                    <XCircle className="w-5 h-5" /> Reject
-                  </button>
-                </div>
-
-                {reviewForm.status === 'approved' && (
-                  <div className="form-control">
-                    <label className="label"><span className="label-text">Payout Amount (₹)</span></label>
-                    <label className="input input-bordered flex items-center gap-2">
-                      <Banknote className="w-4 h-4 text-base-content/40" />
-                      <input type="number" value={reviewForm.payoutAmount} onChange={e => setReviewForm(p => ({ ...p, payoutAmount: e.target.value }))} className="grow"
-                        placeholder={selected.processingResult?.payout_calculation?.final_payout_amount
-                          ? `Suggested: ₹${selected.processingResult.payout_calculation.final_payout_amount.toLocaleString('en-IN')}`
-                          : 'Enter payout amount'} />
-                    </label>
-                  </div>
-                )}
-
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text">{reviewForm.status === 'rejected' ? 'Rejection Reason (required)' : 'Review Notes'}</span>
-                  </label>
-                  <textarea value={reviewForm.reviewNotes} onChange={e => setReviewForm(p => ({ ...p, reviewNotes: e.target.value }))}
-                    className="textarea textarea-bordered" rows="3"
-                    placeholder={reviewForm.status === 'rejected' ? 'Explain why this claim is being rejected...' : 'Add any review notes...'} />
-                  {reviewForm.status === 'rejected' && !reviewForm.reviewNotes && (
-                    <label className="label"><span className="label-text-alt text-error">Required for farmer resubmission</span></label>
-                  )}
-                </div>
-
-                <button onClick={submitReview}
-                  disabled={reviewing || !reviewForm.status || (reviewForm.status === 'rejected' && !reviewForm.reviewNotes)}
-                  className={`btn w-full gap-2 ${reviewForm.status === 'approved' ? 'btn-success' : reviewForm.status === 'rejected' ? 'btn-error' : 'btn-disabled'}`}>
-                  {reviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {reviewing ? 'Processing...' : reviewForm.status === 'approved' ? 'Confirm Approval' : reviewForm.status === 'rejected' ? 'Confirm Rejection' : 'Select action above'}
-                </button>
-              </div>
-            )}
-
-            {/* Already reviewed */}
-            {selected.status === 'approved' && (
-              <div className="alert alert-success"><CheckCircle2 className="w-4 h-4" />
-                <div>
-                  <p className="font-bold">Approved</p>
-                  {selected.payoutAmount > 0 && <p className="text-sm">Payout: ₹{selected.payoutAmount.toLocaleString('en-IN')}</p>}
-                  {selected.reviewNotes && <p className="text-sm opacity-70">{selected.reviewNotes}</p>}
-                </div>
-              </div>
-            )}
-            {selected.status === 'rejected' && (
-              <div className="alert alert-error"><XCircle className="w-4 h-4" />
-                <div>
-                  <p className="font-bold">Rejected</p>
-                  <p className="text-sm">{selected.rejectionReason || selected.reviewNotes || 'No reason provided'}</p>
-                </div>
-              </div>
-            )}
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: 'Status', value: <StatusBadge status={claim.status} /> },
+          { label: 'Farmer', value: claim.userId?.fullName || claim.userId?.phoneNumber || '—' },
+          { label: 'Filed', value: fmt(claim.submittedAt || claim.createdAt) },
+          { label: 'Attempt', value: claim.resubmissionCount ? `Resubmission #${claim.resubmissionCount}` : 'Original' },
+        ].map((d) => (
+          <div key={d.label} className="rounded-md border border-bone bg-parchment p-3">
+            <dt className="label-micro">{d.label}</dt>
+            <dd className="mt-1 text-body text-ink">{d.value}</dd>
           </div>
-          <form method="dialog" className="modal-backdrop"><button onClick={() => setSelected(null)}>close</button></form>
-        </dialog>
+        ))}
+      </dl>
+
+      <section>
+        <h3 className="eyebrow">Claim information</h3>
+        <dl className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {[
+            { label: 'Crop', value: claim.cropType },
+            { label: 'Farm area', value: claim.farmArea ? `${claim.farmArea} acres` : null },
+            { label: 'Cause of loss', value: claim.lossReason },
+            { label: 'State', value: claim.state },
+            { label: 'Season', value: claim.season },
+            { label: 'Policy number', value: claim.insuranceNumber, mono: true },
+          ].map((d) => (
+            <div key={d.label}>
+              <dt className="label-micro">{d.label}</dt>
+              <dd className={`text-body capitalize text-ink ${d.mono ? 'font-mono' : ''}`}>{d.value || '—'}</dd>
+            </div>
+          ))}
+        </dl>
+        {claim.lossDescription && (
+          <div className="mt-3">
+            <p className="label-micro">Farmer's description</p>
+            <p className="mt-1 rounded-md border border-bone bg-parchment p-3 text-body text-ink">
+              {claim.lossDescription}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {claim.processingResult && (
+        <section className="rounded-lg border border-bone bg-parchment p-4">
+          <h3 className="eyebrow">AI assessment</h3>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Meter label="Confidence" value={confidence} caption={`${confidence.toFixed(1)}%`} />
+            {damage != null && <Meter label="Damage" value={damage} caption={`${damage.toFixed(1)}%`} />}
+          </div>
+          <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-bone pt-3">
+            <div>
+              <dt className="label-micro">Recommendation</dt>
+              <dd className="text-body font-medium text-ink">{aiDecision || 'None recorded'}</dd>
+            </div>
+            <div>
+              <dt className="label-micro">Suggested payout</dt>
+              <dd className="text-body font-medium text-ink">
+                {suggested != null ? `₹${suggested.toLocaleString('en-IN')}` : '—'}
+              </dd>
+            </div>
+          </dl>
+
+          {claim.processingResult.verification_evidence && (
+            <ul className="mt-3 flex flex-wrap gap-2 border-t border-bone pt-3">
+              {[
+                { label: 'Authenticity', ok: claim.processingResult.verification_evidence.authenticity_verified },
+                { label: 'Location', ok: claim.processingResult.verification_evidence.location_verified },
+                { label: 'Weather', ok: claim.processingResult.verification_evidence.weather_verified },
+              ].map((v) => (
+                <li
+                  key={v.label}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-caption ${
+                    v.ok ? 'border-sage bg-sage/15 text-deep-olive' : 'border-saddle bg-saddle/10 text-saddle'
+                  }`}
+                >
+                  {v.ok ? (
+                    <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                  ) : (
+                    <XCircle className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  {v.label} {v.ok ? 'verified' : 'not verified'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
-      {/* Table */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <span className="loading loading-spinner loading-lg text-secondary" />
-        </div>
-      ) : (
-        <div className="card bg-base-100 shadow-md overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="table table-zebra">
-              <thead>
-                <tr><th>Claim ID</th><th>Farmer</th><th>Crop</th><th>Loss Reason</th><th>Confidence</th><th>Status</th><th>Date</th><th className="text-right">Actions</th></tr>
-              </thead>
-              <tbody>
-                {claims.length === 0 ? (
-                  <tr><td colSpan="8" className="text-center py-12 text-base-content/40">
-                    <ClipboardCheck className="w-12 h-12 mx-auto mb-3 text-base-content/20" />No claims found
-                  </td></tr>
-                ) : claims.map(c => {
-                  const conf = getConfidence(c);
-                  return (
-                    <tr key={c._id} className="hover">
-                      <td className="font-mono text-xs">{c.documentId}</td>
-                      <td>
-                        <div>
-                          <p className="font-medium">{c.user?.fullName || '—'}</p>
-                          <p className="text-xs text-base-content/40">{c.user?.phoneNumber || '—'}</p>
-                        </div>
-                      </td>
-                      <td className="capitalize">{c.cropType || '—'}</td>
-                      <td className="capitalize">{c.lossReason || '—'}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <progress className={`progress w-16 ${parseFloat(conf) >= 70 ? 'progress-success' : parseFloat(conf) >= 30 ? 'progress-warning' : 'progress-error'}`} value={conf} max="100" />
-                          <span className="text-xs font-medium">{conf}%</span>
-                        </div>
-                      </td>
-                      <td><span className={`badge badge-sm ${statusBadge(c.status)}`}>{(c.status || '').replace(/_/g, ' ')}</span></td>
-                      <td className="text-base-content/40 text-xs">{fmt(c.submittedAt || c.createdAt)}</td>
-                      <td className="text-right">
-                        <button onClick={() => openDetail(c._id)} className="btn btn-ghost btn-xs gap-1">
-                          {needsReview(c.status) ? 'Review' : 'View'} <Eye className="w-3 h-3" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      {evidence.length > 0 && (
+        <section>
+          <h3 className="eyebrow">
+            <Camera className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" /> Evidence photos ({evidence.length})
+          </h3>
+          <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {evidence.map((img, i) => {
+              const src = img.cloudinaryUrl || img.url;
+              return (
+                <li key={img._id || i} className="overflow-hidden rounded-md border border-bone bg-parchment">
+                  <div className="aspect-video">
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={`Evidence: ${img.stepId || `photo ${i + 1}`}`}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <Camera className="h-6 w-6 text-loam" aria-hidden="true" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-bone px-2 py-1.5">
+                    <p className="truncate text-caption text-saddle">{img.stepId || `Photo ${i + 1}`}</p>
+                    {img.coordinates?.lat != null && (
+                      <p className="flex items-center gap-1 truncate text-caption text-bark">
+                        <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {img.coordinates.lat.toFixed(4)}, {img.coordinates.lon.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
-          {pagination.pages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-base-200">
-              <p className="text-xs text-base-content/40">{pagination.total} total claims</p>
-              <div className="join">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="join-item btn btn-sm">
-                  <ChevronLeft className="w-4 h-4" />
+      {claim.rejectionReason && claim.status !== 'rejected' && (
+        <p className="flex items-start gap-2 rounded-md border border-honey-amber bg-honey-amber/20 px-3 py-2.5 text-body text-saddle">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            <span className="label-micro block text-saddle">Rejected previously</span>
+            {claim.rejectionReason}
+          </span>
+        </p>
+      )}
+
+      {needsReview ? (
+        <section className="border-t border-bone pt-5">
+          <h3 className="text-subheading text-ink">Your decision</h3>
+
+          <div role="radiogroup" aria-label="Decision" className="mt-3 grid grid-cols-2 gap-3">
+            {[
+              { value: 'approved', label: 'Approve', Icon: CheckCircle2 },
+              { value: 'rejected', label: 'Reject', Icon: XCircle },
+            ].map((opt) => {
+              const active = reviewForm.status === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setField('status', opt.value)}
+                  className={`flex items-center justify-center gap-2 rounded-md border px-4 py-3 text-body font-medium transition-colors ${
+                    active
+                      ? 'border-honey-amber bg-honey-amber/25 text-ink'
+                      : 'border-loam bg-pure-white text-saddle hover:border-bark'
+                  }`}
+                >
+                  <opt.Icon className="h-5 w-5" aria-hidden="true" /> {opt.label}
                 </button>
-                <button className="join-item btn btn-sm">Page {page}/{pagination.pages}</button>
-                <button onClick={() => setPage(p => Math.min(pagination.pages, p + 1))} disabled={page === pagination.pages} className="join-item btn btn-sm">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              );
+            })}
+          </div>
+          {reviewErrors.status && (
+            <p role="alert" className="mt-2 text-caption text-saddle">
+              {reviewErrors.status}
+            </p>
+          )}
+
+          {reviewForm.status === 'approved' && (
+            <div className="mt-4">
+              <TextField
+                label="Payout amount (₹)"
+                required
+                type="number"
+                inputMode="decimal"
+                min="0"
+                icon={Banknote}
+                value={reviewForm.payoutAmount}
+                onChange={(v) => setField('payoutAmount', v)}
+                error={reviewErrors.payoutAmount}
+                hint={
+                  suggested != null
+                    ? `The pipeline calculated ₹${suggested.toLocaleString('en-IN')}. Change it if your review says otherwise.`
+                    : 'No amount was calculated for this claim — enter the figure you are authorising.'
+                }
+              />
             </div>
           )}
-        </div>
+
+          <div className="mt-4">
+            <TextAreaField
+              label={reviewForm.status === 'rejected' ? 'Reason for rejection' : 'Review notes'}
+              required={reviewForm.status === 'rejected'}
+              rows={3}
+              value={reviewForm.reviewNotes}
+              onChange={(v) => setField('reviewNotes', v)}
+              error={reviewErrors.reviewNotes}
+              hint={
+                reviewForm.status === 'rejected'
+                  ? 'The farmer reads this word for word and uses it to fix their resubmission.'
+                  : 'Kept on the claim record for audit.'
+              }
+              placeholder={
+                reviewForm.status === 'rejected'
+                  ? 'e.g. The corner photos do not show the field described, and no GPS was attached.'
+                  : 'Anything a later reviewer should know.'
+              }
+            />
+          </div>
+
+          <button type="button" onClick={onSubmit} disabled={reviewing} className="btn btn-primary mt-5 w-full">
+            {reviewing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {reviewForm.status === 'approved'
+              ? 'Review approval'
+              : reviewForm.status === 'rejected'
+                ? 'Review rejection'
+                : 'Choose approve or reject'}
+          </button>
+        </section>
+      ) : (
+        <section className="border-t border-bone pt-5">
+          {claim.status === 'approved' && (
+            <div className="rounded-md border border-sage bg-sage/10 px-4 py-3">
+              <p className="flex items-center gap-2 text-body font-medium text-deep-olive">
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Approved
+              </p>
+              {claim.payoutAmount > 0 && (
+                <p className="mt-1 text-body text-ink">
+                  Payout ₹{claim.payoutAmount.toLocaleString('en-IN')}
+                </p>
+              )}
+              {claim.reviewNotes && <p className="mt-1 text-body text-saddle">{claim.reviewNotes}</p>}
+            </div>
+          )}
+          {claim.status === 'rejected' && (
+            <div className="rounded-md border border-saddle bg-saddle/10 px-4 py-3">
+              <p className="flex items-center gap-2 text-body font-medium text-saddle">
+                <XCircle className="h-4 w-4" aria-hidden="true" /> Rejected
+              </p>
+              <p className="mt-1 text-body text-saddle">
+                {claim.rejectionReason || claim.reviewNotes || 'No reason was recorded.'}
+              </p>
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

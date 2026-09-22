@@ -2,7 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ClaimProvider } from './contexts/ClaimContext';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { ToastProvider } from './components/ui/Toast';
+import { LoadingState } from './components/ui/States';
 
 // Public Pages
 import Landing from './pages/Landing';
@@ -12,7 +13,7 @@ import Login from './pages/auth/Login';
 import UserLayout from './components/layouts/UserLayout';
 import AdminLayout from './components/layouts/AdminLayout';
 
-// User Pages
+// Farmer Pages
 import UserDashboard from './pages/user/Dashboard';
 import Policies from './pages/user/Policies';
 import SubmitClaim from './pages/user/SubmitClaim';
@@ -31,17 +32,13 @@ import PolicyManagement from './pages/admin/PolicyManagement';
 import ClaimVerification from './pages/admin/ClaimVerification';
 import ActivityLogs from './pages/admin/ActivityLogs';
 
-/* ─── Protected Route with Role Check ─── */
 function ProtectedRoute({ children, requiredRole }) {
   const { isAuthenticated, user, loading } = useAuth();
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-base-200">
-        <div className="text-center">
-          <span className="loading loading-spinner loading-lg text-primary" />
-          <p className="text-base-content/60 text-lg mt-4">Loading...</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-parchment">
+        <LoadingState label="Checking your session…" />
       </div>
     );
   }
@@ -55,13 +52,12 @@ function ProtectedRoute({ children, requiredRole }) {
   return children;
 }
 
-/* ─── App Routes ─── */
 function AppRoutes() {
   const { user, isAuthenticated } = useAuth();
 
   return (
     <Routes>
-      {/* ── Public Routes ── */}
+      {/* Public */}
       <Route path="/" element={<Landing />} />
       <Route
         path="/login"
@@ -74,7 +70,7 @@ function AppRoutes() {
         }
       />
 
-      {/* ── Farmer Dashboard Routes ── */}
+      {/* Farmer portal */}
       <Route
         path="/dashboard"
         element={
@@ -95,7 +91,7 @@ function AppRoutes() {
         <Route path="install-app" element={<AppInstallGuide />} />
       </Route>
 
-      {/* ── Admin Panel Routes ── */}
+      {/* Admin portal */}
       <Route
         path="/admin"
         element={
@@ -111,15 +107,14 @@ function AppRoutes() {
         <Route path="activity-logs" element={<ActivityLogs />} />
       </Route>
 
-      {/* ── Catch-all → Landing ── */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
-function App() {
+export default function App() {
   return (
-    <ThemeProvider>
+    <ToastProvider>
       <AuthProvider>
         <ClaimProvider>
           <Router>
@@ -127,8 +122,6 @@ function App() {
           </Router>
         </ClaimProvider>
       </AuthProvider>
-    </ThemeProvider>
+    </ToastProvider>
   );
 }
-
-export default App;

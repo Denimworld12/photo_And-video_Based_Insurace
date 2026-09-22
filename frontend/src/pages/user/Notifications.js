@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import api from '../../utils/api';
-import {
-  Bell, CheckCircle2, XCircle, Banknote, ClipboardList,
-  AlertCircle, CheckCheck
-} from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
+import { ErrorState, EmptyState, SkeletonList } from '../../components/ui/States';
+import { useToast } from '../../components/ui/Toast';
+import { Bell, CheckCircle2, XCircle, Banknote, ClipboardList, AlertCircle, CheckCheck } from 'lucide-react';
 
 const TYPE_ICON = {
   claim_update: ClipboardList,
@@ -14,110 +14,146 @@ const TYPE_ICON = {
 };
 
 export default function Notifications() {
+  const toast = useToast();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [markingAll, setMarkingAll] = useState(false);
 
-  useEffect(() => { fetchNotifications(); }, []);
-
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data } = await api.get('/api/notifications');
-      if (data.success) {
-        setNotifications(data.notifications || []);
-        setUnreadCount(data.unreadCount || 0);
-      }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  };
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unreadCount || 0);
+    } catch (err) {
+      // A failed fetch used to fall through to "No notifications yet", telling
+      // the farmer their claim had no updates when the server was simply down.
+      setError(err.response?.data?.error || 'We could not load your notifications. Check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   const markRead = async (id) => {
+    const previous = notifications;
+    const previousCount = unreadCount;
+    setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)));
+    setUnreadCount((c) => Math.max(0, c - 1));
     try {
       await api.patch(`/api/notifications/${id}/read`);
-      setNotifications(p => p.map(n => n._id === id ? { ...n, isRead: true } : n));
-      setUnreadCount(p => Math.max(0, p - 1));
-    } catch { /* ignore */ }
+    } catch {
+      // The optimistic update used to stick even when the request failed, so
+      // the badge cleared locally and came back on the next visit.
+      setNotifications(previous);
+      setUnreadCount(previousCount);
+      toast.error('That notification could not be marked as read.');
+    }
   };
 
   const markAllRead = async () => {
+    const previous = notifications;
+    const previousCount = unreadCount;
+    setMarkingAll(true);
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    setUnreadCount(0);
     try {
       await api.patch('/api/notifications/read-all');
-      setNotifications(p => p.map(n => ({ ...n, isRead: true })));
-      setUnreadCount(0);
-    } catch { /* ignore */ }
+      toast.success('All notifications marked as read.');
+    } catch {
+      setNotifications(previous);
+      setUnreadCount(previousCount);
+      toast.error('We could not mark them all as read. Try again in a moment.');
+    } finally {
+      setMarkingAll(false);
+    }
   };
 
-  const fmt = (d) => {
-    const diff = (Date.now() - new Date(d)) / 1000;
-    if (diff < 60) return 'Just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  const relative = (d) => {
+    const seconds = (Date.now() - new Date(d)) / 1000;
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
     return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-base-content flex items-center gap-2">
-            <Bell className="w-6 h-6 text-primary" /> Notifications
-          </h1>
-          {unreadCount > 0 && (
-            <p className="text-sm text-base-content/50 mt-1">
-              <span className="badge badge-primary badge-sm">{unreadCount}</span> unread
-            </p>
-          )}
-        </div>
-        {unreadCount > 0 && (
-          <button onClick={markAllRead} className="btn btn-ghost btn-sm gap-2">
-            <CheckCheck className="w-4 h-4" /> Mark all read
-          </button>
-        )}
-      </div>
+    <div className="page-shell max-w-3xl space-y-6">
+      <PageHeader
+        eyebrow="Updates"
+        title="Notifications"
+        description={
+          unreadCount > 0
+            ? `${unreadCount} unread update${unreadCount === 1 ? '' : 's'} about your claims.`
+            : 'Claim decisions, payouts and alerts appear here.'
+        }
+        actions={
+          unreadCount > 0 && (
+            <button type="button" onClick={markAllRead} disabled={markingAll} className="btn btn-outline btn-sm">
+              <CheckCheck className="h-4 w-4" aria-hidden="true" /> Mark all read
+            </button>
+          )
+        }
+      />
 
-      {/* Content */}
       {loading ? (
-        <div className="flex flex-col items-center py-16">
-          <span className="loading loading-spinner loading-lg text-primary" />
-          <p className="text-sm text-base-content/40 mt-3">Loading...</p>
-        </div>
+        <SkeletonList rows={4} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={fetchNotifications} />
       ) : notifications.length === 0 ? (
-        <div className="text-center py-16">
-          <Bell className="w-12 h-12 text-base-content/20 mx-auto mb-3" />
-          <h3 className="font-medium text-base-content">No notifications yet</h3>
-          <p className="text-sm text-base-content/40 mt-1">You'll see claim updates and alerts here</p>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title="No notifications yet"
+          message="When a claim moves forward, is decided, or a payout is released, you will hear about it here."
+        />
       ) : (
-        <div className="space-y-2">
-          {notifications.map(n => {
+        <ul className="space-y-2">
+          {notifications.map((n) => {
             const Icon = TYPE_ICON[n.type] || Bell;
+            const unread = !n.isRead;
+
             return (
-              <div
-                key={n._id}
-                onClick={() => !n.isRead && markRead(n._id)}
-                className={`card bg-base-100 cursor-pointer transition-all border ${
-                  !n.isRead ? 'border-l-4 border-l-primary border-primary/20 bg-primary/5' : 'border-base-200 hover:bg-base-200/50'
-                }`}
-              >
-                <div className="card-body p-4 flex-row items-start gap-3">
-                  <div className={`p-2 rounded-lg flex-shrink-0 ${!n.isRead ? 'bg-primary/10 text-primary' : 'bg-base-200 text-base-content/40'}`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className={`text-sm ${!n.isRead ? 'font-semibold text-base-content' : 'font-medium text-base-content/70'}`}>{n.title}</h3>
-                      <span className="text-xs text-base-content/40 flex-shrink-0">{fmt(n.createdAt)}</span>
-                    </div>
-                    <p className="text-sm text-base-content/50 mt-0.5">{n.message}</p>
-                  </div>
-                  {!n.isRead && <div className="w-2.5 h-2.5 rounded-full bg-primary flex-shrink-0 mt-1.5" />}
-                </div>
-              </div>
+              <li key={n._id}>
+                {/* Was a <div onClick>: unreachable by keyboard, and nothing
+                    told a screen reader the item was unread. */}
+                <button
+                  type="button"
+                  onClick={() => unread && markRead(n._id)}
+                  aria-label={unread ? `Unread: ${n.title}. Mark as read` : n.title}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
+                    unread
+                      ? 'border-honey-amber bg-honey-amber/10 hover:bg-honey-amber/20'
+                      : 'border-bone bg-pure-white hover:bg-parchment'
+                  }`}
+                >
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+                      unread ? 'bg-honey-amber/30 text-saddle' : 'bg-parchment text-bark'
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-3">
+                      <span className={`text-body ${unread ? 'font-medium text-ink' : 'text-saddle'}`}>
+                        {n.title}
+                      </span>
+                      <span className="shrink-0 text-caption text-bark">{relative(n.createdAt)}</span>
+                    </span>
+                    <span className="mt-0.5 block text-body text-bark">{n.message}</span>
+                    {unread && <span className="mt-1 block text-caption text-saddle">Tap to mark as read</span>}
+                  </span>
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </div>
   );

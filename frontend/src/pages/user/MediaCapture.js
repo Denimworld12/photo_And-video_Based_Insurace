@@ -1,47 +1,84 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
-import { Camera, Upload, MapPin, CheckCircle2, XCircle, Loader2, ArrowLeft, RefreshCw, Send } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { Meter } from '../../components/ui/StatTile';
+import { themeColor, themeColorAlpha } from '../../utils/theme';
+import {
+  Camera, Upload, MapPin, MapPinOff, CheckCircle2, XCircle, Loader2,
+  ArrowLeft, RefreshCw, Send, AlertTriangle, X, Image as ImageIcon,
+} from 'lucide-react';
 
 const CAPTURE_STEPS = [
-  { id: 'corner-ne', label: 'Northeast Corner', description: 'Northeast corner of your farm' },
-  { id: 'corner-nw', label: 'Northwest Corner', description: 'Northwest corner of your farm' },
-  { id: 'corner-se', label: 'Southeast Corner', description: 'Southeast corner of your farm' },
-  { id: 'corner-sw', label: 'Southwest Corner', description: 'Southwest corner of your farm' },
-  { id: 'damaged-crop', label: 'Damaged Crop Evidence', description: 'Clear evidence of crop damage' },
+  { id: 'corner-ne', label: 'Northeast corner', description: 'Stand at the northeast corner, facing into the field.' },
+  { id: 'corner-nw', label: 'Northwest corner', description: 'Stand at the northwest corner, facing into the field.' },
+  { id: 'corner-se', label: 'Southeast corner', description: 'Stand at the southeast corner, facing into the field.' },
+  { id: 'corner-sw', label: 'Southwest corner', description: 'Stand at the southwest corner, facing into the field.' },
+  { id: 'damaged-crop', label: 'Damaged crop', description: 'Close enough to see the damage clearly on the plants.' },
 ];
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 
 export default function MediaCapture() {
   const { documentId } = useParams();
   const navigate = useNavigate();
   const [stream, setStream] = useState(null);
   const [coords, setCoords] = useState(null);
+  const [geoState, setGeoState] = useState('pending'); // pending | ok | denied | unsupported
   const [currentStep, setCurrentStep] = useState(0);
   const [capturedBlobs, setCapturedBlobs] = useState({});
   const [uploadProgress, setUploadProgress] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+  const streamRef = useRef(null);
 
-  useEffect(() => { return () => stopCamera(); }, []); // eslint-disable-line
-
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (p) => setCoords({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy }),
-        () => setCoords({ lat: 28.6139, lon: 77.2090, accuracy: 100 }),
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    }
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setStream(null);
+    if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const stopCamera = () => {
-    if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
-    if (videoRef.current) videoRef.current.srcObject = null;
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGeoState('unsupported');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setCoords({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy });
+        setGeoState('ok');
+      },
+      // This used to silently substitute the coordinates of New Delhi when
+      // location was refused, so a claim from anywhere in India was stamped
+      // and uploaded as if it were filed in Delhi — with nothing on screen to
+      // say so. It now reports honestly and asks the farmer to fix it.
+      () => setGeoState('denied'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }, []);
+
+  const retryLocation = () => {
+    if (!navigator.geolocation) return;
+    setGeoState('pending');
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setCoords({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy });
+        setGeoState('ok');
+      },
+      () => setGeoState('denied'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const startCamera = async () => {
@@ -49,11 +86,13 @@ export default function MediaCapture() {
       setError(null);
       setCaptureMode('camera');
       const ms = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
-      if (videoRef.current) { videoRef.current.srcObject = ms; setStream(ms); }
+      streamRef.current = ms;
+      setStream(ms);
+      if (videoRef.current) videoRef.current.srcObject = ms;
     } catch {
-      setError('Camera access denied. Use file upload instead.');
+      setError('We could not open the camera. Allow camera access in your browser settings, or choose a photo from your gallery instead.');
       setCaptureMode(null);
     }
   };
@@ -61,90 +100,106 @@ export default function MediaCapture() {
   const capturePhoto = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     try {
-      setLoading(true);
-      const v = videoRef.current, c = canvasRef.current;
-      c.width = v.videoWidth || 1920;
-      c.height = v.videoHeight || 1080;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(v, 0, 0, c.width, c.height);
-      const ts = new Date();
-      const fs = Math.max(16, c.width * 0.02);
-      ctx.font = `bold ${fs}px Arial`;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(10, c.height - 90, c.width - 20, 80);
-      ctx.fillStyle = 'white';
-      [`${ts.toLocaleDateString('en-GB')} ${ts.toLocaleTimeString()}`,
-        `${coords?.lat.toFixed(6)}, ${coords?.lon.toFixed(6)}`,
+      setBusy(true);
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth || 1920;
+      canvas.height = video.videoHeight || 1080;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const stamped = new Date();
+      const fontSize = Math.max(16, canvas.width * 0.02);
+      ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+      ctx.fillStyle = themeColorAlpha('ink', 0.72);
+      ctx.fillRect(10, canvas.height - 90, canvas.width - 20, 80);
+      ctx.fillStyle = themeColor('parchment');
+      [
+        `${stamped.toLocaleDateString('en-GB')} ${stamped.toLocaleTimeString()}`,
+        coords ? `${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}` : 'Location unavailable',
         CAPTURE_STEPS[currentStep].label,
-      ].forEach((l, i) => ctx.fillText(l, 20, c.height - 65 + i * 25));
-      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
-      setCapturedBlobs(p => ({ ...p, [CAPTURE_STEPS[currentStep].id]: { blob, step: CAPTURE_STEPS[currentStep], timestamp: ts, coords: coords || { lat: 0, lon: 0 } } }));
-      if (currentStep < CAPTURE_STEPS.length - 1) setCurrentStep(p => p + 1);
-    } catch (e) { setError('Capture failed: ' + e.message); }
-    finally { setLoading(false); }
+      ].forEach((line, i) => ctx.fillText(line, 20, canvas.height - 65 + i * 25));
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      recordCapture(blob, stamped);
+    } catch (e) {
+      setError(`We could not save that photo: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const recordCapture = (blob, timestamp) => {
+    const stepItem = CAPTURE_STEPS[currentStep];
+    setCapturedBlobs((prev) => ({
+      ...prev,
+      [stepItem.id]: { blob, step: stepItem, timestamp, coords },
+    }));
+    setUploadProgress((prev) => ({ ...prev, [stepItem.id]: undefined }));
+    const nextMissing = CAPTURE_STEPS.findIndex((s, i) => i > currentStep && !capturedBlobs[s.id]);
+    if (nextMissing !== -1) setCurrentStep(nextMissing);
   };
 
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
+    const reset = () => {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
     if (!file) return;
 
-    // Validate image type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
-    if (!validTypes.some(t => file.type === t)) {
-      setError('Invalid file type. Only JPG and PNG images are accepted.');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      setError('That file is not a photo. Choose a JPG or PNG image.');
+      reset();
       return;
     }
-
-    // Validate file isn't empty
     if (file.size === 0) {
-      setError('File is empty. Please select a valid image.');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setError('That file is empty. Choose another photo.');
+      reset();
       return;
     }
-
-    // Validate file size (max 10 MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File is too large. Maximum size is 10 MB.');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    if (file.size > MAX_FILE_BYTES) {
+      setError('That photo is larger than 10 MB. Choose a smaller one, or take a new photo with the camera.');
+      reset();
       return;
     }
 
     setError(null);
     stopCamera();
     setCaptureMode('upload');
-    setCapturedBlobs(p => ({ ...p, [CAPTURE_STEPS[currentStep].id]: { blob: file, step: CAPTURE_STEPS[currentStep], timestamp: new Date(), coords: coords || { lat: 0, lon: 0 } } }));
-    if (currentStep < CAPTURE_STEPS.length - 1) setCurrentStep(p => p + 1);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    recordCapture(file, new Date());
+    reset();
   };
 
   const submitAllEvidence = async () => {
-    // Validate all images before submission
-    const blobEntries = Object.entries(capturedBlobs);
-    if (blobEntries.length === 0) {
-      setError('No images captured. Please capture or upload at least one image.');
+    const entries = Object.entries(capturedBlobs);
+    if (entries.length === 0) {
+      setError('Take at least one photo before submitting.');
+      setConfirmOpen(false);
       return;
     }
 
-    for (const [stepId, cd] of blobEntries) {
-      if (!cd.blob || (cd.blob.size !== undefined && cd.blob.size === 0)) {
-        setError(`Invalid image for step "${cd.step?.label || stepId}". Please recapture.`);
-        return;
-      }
+    const invalid = entries.find(([, cd]) => !cd.blob || cd.blob.size === 0);
+    if (invalid) {
+      setError(`The photo for “${invalid[1].step?.label || invalid[0]}” did not save properly. Take it again.`);
+      setConfirmOpen(false);
+      return;
     }
 
     try {
       setIsSubmitting(true);
       setError(null);
       stopCamera();
-      console.log(`[MediaCapture] Starting upload of ${blobEntries.length} images for ${documentId}`);
 
-      for (const [stepId, cd] of blobEntries) {
-        setUploadProgress(p => ({ ...p, [stepId]: 'uploading' }));
+      // Only send what has not already landed, so retrying after a dropped
+      // connection resumes instead of re-uploading every photo.
+      const pending = entries.filter(([stepId]) => uploadProgress[stepId] !== 'success');
+
+      for (const [stepId, cd] of pending) {
+        setUploadProgress((prev) => ({ ...prev, [stepId]: 'uploading' }));
         const fd = new FormData();
         fd.append('image', cd.blob, `${stepId}.jpg`);
-        fd.append('lat', (cd.coords?.lat || 0).toString());
-        fd.append('lon', (cd.coords?.lon || 0).toString());
+        fd.append('lat', (cd.coords?.lat ?? 0).toString());
+        fd.append('lon', (cd.coords?.lon ?? 0).toString());
         fd.append('client_ts', (cd.timestamp?.getTime() || Date.now()).toString());
         fd.append('parcel_id', documentId);
         fd.append('media_type', 'photo');
@@ -152,178 +207,298 @@ export default function MediaCapture() {
 
         try {
           await api.post('/api/claims/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-          setUploadProgress(p => ({ ...p, [stepId]: 'success' }));
-          console.log(`[MediaCapture] ✅ Uploaded ${stepId}`);
+          setUploadProgress((prev) => ({ ...prev, [stepId]: 'success' }));
         } catch (uploadErr) {
-          console.error(`[MediaCapture] ❌ Upload failed for ${stepId}:`, uploadErr.response?.data || uploadErr.message);
-          setUploadProgress(p => ({ ...p, [stepId]: 'error' }));
+          setUploadProgress((prev) => ({ ...prev, [stepId]: 'error' }));
           throw uploadErr;
         }
       }
 
-      console.log(`[MediaCapture] All uploads complete, completing claim...`);
-      await api.post('/api/claims/complete', { documentId, totalSteps: CAPTURE_STEPS.length, completedSteps: blobEntries.length });
-      console.log(`[MediaCapture] ✅ Claim completed: ${documentId}`);
-      setTimeout(() => navigate(`/dashboard/claim-results/${documentId}`), 1500);
+      await api.post('/api/claims/complete', {
+        documentId,
+        totalSteps: CAPTURE_STEPS.length,
+        completedSteps: entries.length,
+      });
+      setConfirmOpen(false);
+      navigate(`/dashboard/claim-results/${documentId}`);
     } catch (err) {
-      const failedSteps = Object.keys(uploadProgress).filter(k => uploadProgress[k] !== 'success');
-      failedSteps.forEach(k => setUploadProgress(p => ({ ...p, [k]: 'error' })));
-      const errMsg = err.response?.data?.message || err.response?.data?.error || 'Upload failed. Please try again.';
-      console.error('[MediaCapture] ❌ Error:', errMsg);
-      setError(errMsg);
-    } finally { setIsSubmitting(false); }
+      setConfirmOpen(false);
+      setError(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          'The upload stopped partway. Your finished photos are kept — press submit again to send the rest.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const allCaptured = CAPTURE_STEPS.every(s => capturedBlobs[s.id]);
   const capturedCount = Object.keys(capturedBlobs).length;
-  const progress = (capturedCount / CAPTURE_STEPS.length) * 100;
+  const allCaptured = CAPTURE_STEPS.every((s) => capturedBlobs[s.id]);
+  const activeStep = CAPTURE_STEPS[currentStep];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+    <div className="page-shell max-w-3xl space-y-6">
+      <canvas ref={canvasRef} className="hidden" />
 
-      {/* Header */}
-      <div className="card bg-base-100 shadow-md">
-        <div className="card-body">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              <Camera className="w-5 h-5 text-primary" /> Evidence Collection
-            </h1>
-            <span className="text-xs text-base-content/40 font-mono">{documentId}</span>
-          </div>
-          <p className="text-sm text-base-content/60 mb-3">Step {currentStep + 1} of {CAPTURE_STEPS.length}</p>
-          <progress className="progress progress-primary w-full" value={progress} max="100" />
-          {coords && (
-            <p className="text-xs text-base-content/40 flex items-center gap-1 mt-2">
-              <MapPin className="w-3 h-3" /> {coords.lat.toFixed(4)}, {coords.lon.toFixed(4)} (±{coords.accuracy?.toFixed(0)}m)
+      <PageHeader
+        eyebrow="Evidence"
+        title="Photograph the damage"
+        description={`Five photos: the four corners of your field, and the damaged crop.`}
+        actions={<span className="font-mono text-caption text-bark">{documentId}</span>}
+      />
+
+      <div className="rounded-lg border border-bone bg-pure-white p-5">
+        <Meter
+          label="Photos taken"
+          value={capturedCount}
+          max={CAPTURE_STEPS.length}
+          caption={`${capturedCount} of ${CAPTURE_STEPS.length}`}
+        />
+
+        <div className="mt-4 border-t border-bone pt-4">
+          {geoState === 'ok' && coords && (
+            <p className="flex items-center gap-2 text-caption text-bark">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-sage" aria-hidden="true" />
+              Location locked: {coords.lat.toFixed(4)}, {coords.lon.toFixed(4)} (±{coords.accuracy?.toFixed(0)}m)
             </p>
+          )}
+          {geoState === 'pending' && (
+            <p className="flex items-center gap-2 text-caption text-bark">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" /> Finding your location…
+            </p>
+          )}
+          {(geoState === 'denied' || geoState === 'unsupported') && (
+            <div className="flex flex-wrap items-start gap-3 rounded-md border border-honey-amber bg-honey-amber/20 px-3 py-2.5">
+              <MapPinOff className="mt-0.5 h-4 w-4 shrink-0 text-saddle" aria-hidden="true" />
+              <p className="min-w-0 flex-1 text-body text-saddle">
+                <span className="font-medium">Your location is not available.</span> Photos will be sent without GPS
+                coordinates, which usually means your claim needs a manual field visit before it can be paid.
+              </p>
+              {geoState === 'denied' && (
+                <button type="button" onClick={retryLocation} className="btn btn-outline btn-sm">
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" /> Try again
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {/* Error */}
       {error && (
-        <div className="alert alert-error">
-          <XCircle className="w-5 h-5" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="btn btn-ghost btn-xs">✕</button>
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-md border border-saddle bg-saddle/10 px-4 py-3 text-body text-saddle"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p className="min-w-0 flex-1">{error}</p>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            aria-label="Dismiss"
+            className="btn btn-ghost btn-xs btn-circle shrink-0"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
       )}
 
-      {/* Capture Area */}
       {!allCaptured && (
-        <div className="card bg-base-100 shadow-md">
-          <div className="card-body">
-            <h2 className="card-title text-base">
-              <MapPin className="w-4 h-4 text-primary" /> {CAPTURE_STEPS[currentStep].label}
-            </h2>
-            <p className="text-sm text-base-content/60">{CAPTURE_STEPS[currentStep].description}</p>
+        <section className="rounded-lg border border-bone bg-pure-white p-5">
+          <p className="eyebrow">
+            Photo {currentStep + 1} of {CAPTURE_STEPS.length}
+          </p>
+          <h2 className="mt-1 text-subheading text-ink">{activeStep.label}</h2>
+          <p className="mt-1 text-body text-bark">{activeStep.description}</p>
 
-            {!captureMode && (
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <button onClick={startCamera} className="btn btn-primary flex-col h-auto py-6 gap-2">
-                  <Camera className="w-8 h-8" />
-                  <span className="text-sm font-medium">Capture Photo</span>
-                  <span className="text-[10px] opacity-60">Use device camera</span>
+          {!captureMode && (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={startCamera} className="btn btn-primary h-auto flex-col gap-1 py-5">
+                <Camera className="h-7 w-7" aria-hidden="true" />
+                <span className="text-body font-medium">Take a photo</span>
+                <span className="text-caption font-normal opacity-70">Stamped with time and GPS</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="btn btn-outline h-auto flex-col gap-1 py-5"
+              >
+                <ImageIcon className="h-7 w-7" aria-hidden="true" />
+                <span className="text-body font-medium">Choose from gallery</span>
+                <span className="text-caption font-normal opacity-70">Slower to verify</span>
+              </button>
+            </div>
+          )}
+
+          {captureMode === 'camera' && (
+            <div className="mt-5 space-y-3">
+              <div className="relative aspect-video overflow-hidden rounded-lg bg-charcoal-olive">
+                <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+                {busy && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-ink/50">
+                    <Loader2 className="h-8 w-8 animate-spin text-parchment" aria-hidden="true" />
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  disabled={busy || !stream}
+                  className="btn btn-primary flex-1"
+                >
+                  <Camera className="h-4 w-4" aria-hidden="true" /> {busy ? 'Saving…' : 'Capture'}
                 </button>
-                <button onClick={() => fileInputRef.current?.click()} className="btn btn-outline flex-col h-auto py-6 gap-2">
-                  <Upload className="w-8 h-8" />
-                  <span className="text-sm">Upload Photo</span>
-                  <span className="text-[10px] opacity-60">For testing only</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopCamera();
+                    setCaptureMode(null);
+                  }}
+                  className="btn btn-outline"
+                >
+                  Cancel
                 </button>
               </div>
-            )}
+            </div>
+          )}
 
-            {captureMode === 'camera' && (
-              <div className="space-y-3 mt-2">
-                <div className="relative bg-black rounded-xl overflow-hidden aspect-video">
-                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                  {loading && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 text-white animate-spin" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={capturePhoto} disabled={loading || !stream} className="btn btn-primary flex-1 gap-2">
-                    <Camera className="w-4 h-4" /> {loading ? 'Processing...' : 'Capture Photo'}
-                  </button>
-                  <button onClick={() => { stopCamera(); setCaptureMode(null); }} className="btn btn-ghost">
-                    <RefreshCw className="w-4 h-4" /> Switch
-                  </button>
-                </div>
-              </div>
-            )}
+          {captureMode === 'upload' && (
+            <div className="mt-5 space-y-3">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full flex-col items-center gap-2 rounded-lg border border-dashed border-loam bg-parchment p-8 transition-colors hover:border-honey-amber"
+              >
+                <Upload className="h-8 w-8 text-bark" aria-hidden="true" />
+                <span className="text-body text-saddle">Choose a photo for “{activeStep.label}”</span>
+                <span className="text-caption text-bark">JPG or PNG, up to 10 MB</span>
+              </button>
+              <button type="button" onClick={() => setCaptureMode(null)} className="btn btn-ghost w-full text-saddle">
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to camera
+              </button>
+            </div>
+          )}
 
-            {captureMode === 'upload' && (
-              <div className="space-y-3 mt-2">
-                <div onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-3 p-10 border-2 border-dashed border-base-300 rounded-xl cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
-                  <Upload className="w-10 h-10 text-base-content/40" />
-                  <p className="text-sm text-base-content/60">Click to select an image</p>
-                  <span className="text-xs text-base-content/30">JPG, PNG only — Max 10MB</span>
-                </div>
-                <button onClick={() => setCaptureMode(null)} className="btn btn-ghost w-full gap-2">
-                  <ArrowLeft className="w-4 h-4" /> Switch to Camera
-                </button>
-              </div>
-            )}
-
-            <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/jpg" onChange={handleFileUpload} className="hidden" />
-          </div>
-        </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/jpg"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+        </section>
       )}
 
-      {/* Steps Grid */}
-      <div className="card bg-base-100 shadow-md">
-        <div className="card-body">
-          <h3 className="font-medium text-base-content mb-3">Captured Evidence</h3>
-          <div className="grid grid-cols-5 gap-2">
-            {CAPTURE_STEPS.map((stepItem, i) => {
-              const captured = capturedBlobs[stepItem.id];
-              const status = uploadProgress[stepItem.id];
-              const isCurrent = i === currentStep && !allCaptured;
-              return (
+      <section className="rounded-lg border border-bone bg-pure-white p-5">
+        <h2 className="eyebrow">Your photos</h2>
+        {/* A five-column grid put ~55px cells with two-word labels on a 360px
+            phone. A list gives each photo a full-width, tappable row. */}
+        <ul className="mt-3 divide-y divide-bone">
+          {CAPTURE_STEPS.map((stepItem, i) => {
+            const captured = capturedBlobs[stepItem.id];
+            const status = uploadProgress[stepItem.id];
+            const isCurrent = i === currentStep && !allCaptured;
+
+            return (
+              <li key={stepItem.id}>
                 <button
-                  key={stepItem.id}
-                  onClick={() => !allCaptured && setCurrentStep(i)}
-                  className={`p-3 rounded-xl text-center transition-all border-2 ${
-                    captured ? 'bg-success/10 border-success' :
-                    isCurrent ? 'bg-primary/10 border-primary' :
-                    'bg-base-200 border-transparent'
+                  type="button"
+                  onClick={() => {
+                    setCurrentStep(i);
+                    setCaptureMode(null);
+                  }}
+                  disabled={isSubmitting}
+                  className={`flex w-full items-center gap-3 px-1 py-3 text-left transition-colors hover:bg-parchment ${
+                    isCurrent ? 'bg-honey-amber/10' : ''
                   }`}
                 >
-                  <span className="text-lg block">
-                    {status === 'uploading' ? <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" /> :
-                     status === 'success' ? <CheckCircle2 className="w-5 h-5 mx-auto text-success" /> :
-                     status === 'error' ? <XCircle className="w-5 h-5 mx-auto text-error" /> :
-                     captured ? <CheckCircle2 className="w-5 h-5 mx-auto text-success" /> :
-                     <Camera className="w-5 h-5 mx-auto text-base-content/30" />}
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center">
+                    {status === 'uploading' ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-saddle" aria-hidden="true" />
+                    ) : status === 'error' ? (
+                      <XCircle className="h-5 w-5 text-saddle" aria-hidden="true" />
+                    ) : captured ? (
+                      <CheckCircle2 className="h-5 w-5 text-sage" aria-hidden="true" />
+                    ) : (
+                      <Camera className="h-5 w-5 text-loam" aria-hidden="true" />
+                    )}
                   </span>
-                  <span className="text-[10px] text-base-content/50 block mt-1 leading-tight">{stepItem.label}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-body font-medium text-ink">{stepItem.label}</span>
+                    <span className="block text-caption text-bark">
+                      {status === 'uploading'
+                        ? 'Uploading…'
+                        : status === 'success'
+                          ? 'Uploaded'
+                          : status === 'error'
+                            ? 'Upload failed — press submit to retry'
+                            : captured
+                              ? `Taken ${captured.timestamp.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+                              : 'Not taken yet'}
+                    </span>
+                  </span>
+                  {!captured && (
+                    <span className="shrink-0 text-caption font-medium text-saddle">
+                      {isCurrent ? 'Take now' : 'Take'}
+                    </span>
+                  )}
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
 
-      {/* Submit */}
-      {allCaptured && (
-        <div className="card bg-success/10 border-2 border-success shadow-md">
-          <div className="card-body text-center">
-            <CheckCircle2 className="w-12 h-12 text-success mx-auto mb-2" />
-            <h3 className="font-semibold text-base-content text-lg">All Evidence Captured!</h3>
-            <p className="text-sm text-base-content/60 mb-4">{capturedCount} images ready for upload and analysis</p>
-            <button onClick={submitAllEvidence} disabled={isSubmitting} className="btn btn-primary btn-lg gap-2">
-              {isSubmitting ? (
-                <><Loader2 className="w-5 h-5 animate-spin" /> Uploading & Processing...</>
-              ) : (
-                <><Send className="w-5 h-5" /> Submit All Evidence</>
-              )}
-            </button>
-          </div>
+      {capturedCount > 0 && (
+        <div className="sticky bottom-20 z-10 rounded-lg border border-bone bg-pure-white p-4 lg:bottom-4">
+          {!allCaptured && (
+            <p className="mb-3 text-body text-bark">
+              {CAPTURE_STEPS.length - capturedCount} photo
+              {CAPTURE_STEPS.length - capturedCount === 1 ? '' : 's'} still to take. A complete set is assessed
+              faster and needs fewer field visits.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            disabled={isSubmitting}
+            className="btn btn-primary w-full"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> Uploading…
+              </>
+            ) : (
+              <>
+                <Send className="h-5 w-5" aria-hidden="true" /> Submit {capturedCount} photo
+                {capturedCount === 1 ? '' : 's'}
+              </>
+            )}
+          </button>
         </div>
       )}
+
+      {/* Uploading ends the farmer's part of the claim and starts the AI
+          assessment, so it asks first — and says plainly when the set is short. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        busy={isSubmitting}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={submitAllEvidence}
+        title={allCaptured ? 'Submit your photos?' : 'Submit an incomplete set?'}
+        description={
+          allCaptured
+            ? 'Your photos go to the assessor and the AI analysis starts. You will see the result on the next screen.'
+            : 'You have not taken every photo. Incomplete claims are usually sent for a manual field visit, which takes longer to settle.'
+        }
+        summary={[
+          { label: 'Photos', value: `${capturedCount} of ${CAPTURE_STEPS.length}` },
+          { label: 'Location', value: geoState === 'ok' ? 'GPS attached' : 'Not available' },
+          { label: 'Claim', value: documentId },
+        ]}
+        confirmLabel={allCaptured ? 'Submit photos' : 'Submit anyway'}
+      />
     </div>
   );
 }

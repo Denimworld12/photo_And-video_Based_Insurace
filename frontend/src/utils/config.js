@@ -21,8 +21,8 @@
  *    runtime. This module supports that pattern via `fetchRuntimeConfig()`.
  *
  * SUMMARY:
- * - Build-time env vars  → baked in, updated when you redeploy the frontend.
- * - Runtime config (JSON) → fetched on every app launch, can change anytime.
+ * - Build-time env vars  -> baked in, updated when you redeploy the frontend.
+ * - Runtime config (JSON) -> fetched on every app launch, can change anytime.
  * - PWA updates are automatic — the installed app always gets the latest
  *   deployed version on the next launch after a new deployment.
  */

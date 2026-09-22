@@ -1,15 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useClaim } from '../../contexts/ClaimContext';
 import api from '../../utils/api';
 import { INDIAN_STATES, SEASONS, CROP_TYPES, LOSS_REASONS } from '../../utils/constants';
-import { ArrowLeft, ArrowRight, MapPin, Sprout, Camera, CheckCircle2, Loader2 } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { TextField, SelectField, TextAreaField } from '../../components/ui/Field';
+import { LoadingState, ErrorState } from '../../components/ui/States';
+import { ArrowLeft, ArrowRight, MapPin, Sprout, Camera, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 
 const STEPS = [
-  { id: 1, label: 'Location & Policy', icon: MapPin },
-  { id: 2, label: 'Crop & Damage', icon: Sprout },
-  { id: 3, label: 'Review & Submit', icon: CheckCircle2 },
+  { id: 1, label: 'Location', icon: MapPin },
+  { id: 2, label: 'Damage', icon: Sprout },
+  { id: 3, label: 'Review', icon: CheckCircle2 },
 ];
+
+const MIN_DESCRIPTION = 10;
 
 export default function SubmitClaim() {
   const { insuranceId } = useParams();
@@ -18,64 +24,85 @@ export default function SubmitClaim() {
   const [step, setStep] = useState(1);
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [form, setForm] = useState({
-    state: '', season: '', farmArea: '', insuranceNumber: '',
-    cropType: '', lossReason: '', lossDescription: '',
+    state: '',
+    season: '',
+    farmArea: '',
+    insuranceNumber: '',
+    cropType: '',
+    lossReason: '',
+    lossDescription: '',
   });
-
   const [fieldErrors, setFieldErrors] = useState({});
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get(`/api/insurance/${insuranceId}`);
-        setPolicy(data.insurance || data.policy || data);
-      } catch { setError('Policy not found'); }
-      finally { setLoading(false); }
-    })();
+  const fetchPolicy = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const { data } = await api.get(`/api/insurance/${insuranceId}`);
+      setPolicy(data.insurance || data.policy || data);
+    } catch (err) {
+      setLoadError(err.response?.data?.error || 'We could not find that policy. It may have been withdrawn.');
+    } finally {
+      setLoading(false);
+    }
   }, [insuranceId]);
 
-  const set = (k, v) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    setFieldErrors((p) => ({ ...p, [k]: '' }));
+  useEffect(() => {
+    fetchPolicy();
+  }, [fetchPolicy]);
+
+  const set = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    setFieldErrors((prev) => ({ ...prev, [key]: '' }));
   };
 
   const validateStep = (s) => {
     const errs = {};
     if (s === 1) {
-      if (!form.state) errs.state = 'State is required';
-      if (!form.season) errs.season = 'Season is required';
-      if (!form.farmArea) errs.farmArea = 'Farm area is required';
-      else if (parseFloat(form.farmArea) <= 0) errs.farmArea = 'Farm area must be positive';
-      else if (parseFloat(form.farmArea) > 10000) errs.farmArea = 'Farm area seems too large';
+      if (!form.state) errs.state = 'Choose the state your farm is in';
+      if (!form.season) errs.season = 'Choose the growing season';
+      const area = parseFloat(form.farmArea);
+      if (!form.farmArea) errs.farmArea = 'Enter your farm area in acres';
+      else if (Number.isNaN(area) || area <= 0) errs.farmArea = 'Farm area must be more than 0 acres';
+      else if (area > 10000) errs.farmArea = 'That area looks too large — check the number';
     }
     if (s === 2) {
-      if (!form.cropType) errs.cropType = 'Crop type is required';
-      if (!form.lossReason) errs.lossReason = 'Loss reason is required';
-      if (!form.lossDescription) errs.lossDescription = 'Damage description is required';
-      else if (form.lossDescription.trim().length < 10) errs.lossDescription = 'Please provide at least 10 characters';
+      if (!form.cropType) errs.cropType = 'Choose the crop that was damaged';
+      if (!form.lossReason) errs.lossReason = 'Choose what caused the damage';
+      if (!form.lossDescription.trim()) errs.lossDescription = 'Describe what happened to your crop';
+      else if (form.lossDescription.trim().length < MIN_DESCRIPTION)
+        errs.lossDescription = `Please write at least ${MIN_DESCRIPTION} characters so the assessor understands the damage`;
     }
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
-  const canNext = () => {
-    if (step === 1) return form.state && form.season && form.farmArea && parseFloat(form.farmArea) > 0;
-    if (step === 2) return form.cropType && form.lossReason && form.lossDescription.trim().length >= 10;
-    return true;
+  // The Next button used to be disabled until the step validated, which told
+  // the farmer nothing about what was missing. It is always pressable now and
+  // points at the fields that still need an answer.
+  const goNext = () => {
+    if (validateStep(step)) {
+      setStep((s) => s + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
-  const goNext = () => {
-    if (validateStep(step)) setStep(step + 1);
+  const goBack = () => {
+    setStep((s) => s - 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async () => {
     try {
-      setSubmitting(true); setError('');
-      const documentId = generateDocumentId();
+      setSubmitting(true);
+      setError('');
+      const fallbackId = generateDocumentId();
       const payload = {
         insuranceId,
         formData: {
@@ -90,197 +117,272 @@ export default function SubmitClaim() {
           year: new Date().getFullYear(),
         },
       };
-      console.log('[SubmitClaim] Initializing claim:', JSON.stringify(payload, null, 2));
       const { data } = await api.post('/api/claims/initialize', payload);
       if (data.success) {
-        console.log('[SubmitClaim] Claim initialized:', data.claim?.documentId);
-        navigate(`/dashboard/media-capture/${data.claim?.documentId || documentId}`);
+        setConfirmOpen(false);
+        navigate(`/dashboard/media-capture/${data.claim?.documentId || fallbackId}`);
       } else {
-        const errMsg = data.details ? data.details.join(', ') : (data.error || 'Submission failed');
-        console.error('[SubmitClaim] API returned failure:', errMsg);
-        setError(errMsg);
+        setError(data.details ? data.details.join(', ') : data.error || 'We could not start your claim. Try again.');
+        setConfirmOpen(false);
       }
     } catch (err) {
-      const errMsg = err.response?.data?.details
-        ? err.response.data.details.join(', ')
-        : (err.response?.data?.error || 'Failed to submit claim. Please try again.');
-      console.error('[SubmitClaim] Error:', err.response?.status, errMsg);
-      setError(errMsg);
-    } finally { setSubmitting(false); }
+      setError(
+        err.response?.data?.details
+          ? err.response.data.details.join(', ')
+          : err.response?.data?.error || 'We could not start your claim. Check your connection and try again.'
+      );
+      setConfirmOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  if (loading) {
+  if (loading) return <LoadingState label="Loading policy…" />;
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <span className="loading loading-spinner loading-lg text-primary" />
-      </div>
+      <ErrorState
+        title="Policy unavailable"
+        message={loadError}
+        onRetry={() => navigate('/dashboard/policies')}
+        retryLabel="Back to policies"
+      />
     );
   }
 
+  const reviewRows = [
+    { label: 'Policy', value: policy?.name || '—' },
+    { label: 'State', value: form.state },
+    { label: 'Season', value: form.season },
+    { label: 'Farm area', value: `${form.farmArea} acres` },
+    { label: 'Policy number', value: form.insuranceNumber || 'Not provided' },
+    { label: 'Crop', value: form.cropType },
+    { label: 'Cause of loss', value: form.lossReason },
+  ];
+
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-base-content">Submit Claim</h1>
-          {policy && <p className="text-sm text-base-content/50 mt-0.5">Policy: {policy.name}</p>}
-        </div>
-        <button onClick={() => navigate('/dashboard/policies')} className="btn btn-ghost btn-sm gap-1">
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-      </div>
+    <div className="page-shell max-w-3xl space-y-6">
+      <PageHeader
+        eyebrow={policy?.name || 'New claim'}
+        title="File a claim"
+        description="Three short steps, then you will photograph the damage."
+        actions={
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/policies')}
+            className="btn btn-ghost btn-sm text-saddle"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Policies
+          </button>
+        }
+      />
 
-      {/* Steps indicator */}
-      <ul className="steps w-full">
-        {STEPS.map((s) => (
-          <li key={s.id} className={`step ${step >= s.id ? 'step-primary' : ''}`}>
-            <span className="hidden sm:inline">{s.label}</span>
-          </li>
-        ))}
-      </ul>
+      {/* The step rail previously hid its labels below 640px (`hidden sm:inline`),
+          leaving a phone user with three unlabelled numbers. */}
+      <ol className="flex items-stretch gap-2" aria-label="Progress">
+        {STEPS.map((s) => {
+          const state = step === s.id ? 'current' : step > s.id ? 'done' : 'upcoming';
+          return (
+            <li key={s.id} className="flex-1">
+              <div
+                aria-current={state === 'current' ? 'step' : undefined}
+                className={`flex h-full flex-col gap-1 rounded-md border-t-2 px-1 pt-2 ${
+                  state === 'upcoming' ? 'border-bone' : 'border-honey-amber'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <s.icon
+                    className={`h-4 w-4 shrink-0 ${state === 'upcoming' ? 'text-loam' : 'text-saddle'}`}
+                    aria-hidden="true"
+                  />
+                  <span className="label-micro">Step {s.id}</span>
+                </span>
+                <span
+                  className={`text-body ${state === 'current' ? 'font-medium text-ink' : 'text-bark'}`}
+                >
+                  {s.label}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
 
-      {/* Error */}
       {error && (
-        <div className="alert alert-error">
-          <span>{error}</span>
-        </div>
+        <p
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-saddle bg-saddle/10 px-4 py-3 text-body text-saddle"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {error}
+        </p>
       )}
 
-      {/* Form card */}
-      <div className="card bg-base-100 shadow-md">
-        <div className="card-body">
-          {/* Step 1: Location & Policy */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-primary" /> Location & Policy Details
-              </h3>
-              <div className="form-control">
-                <label className="label"><span className="label-text">State *</span></label>
-                <select value={form.state} onChange={(e) => set('state', e.target.value)} className={`select select-bordered w-full ${fieldErrors.state ? 'select-error' : ''}`}>
-                  <option value="">Select state</option>
-                  {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-                {fieldErrors.state && <label className="label"><span className="label-text-alt text-error">{fieldErrors.state}</span></label>}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Season *</span></label>
-                  <select value={form.season} onChange={(e) => set('season', e.target.value)} className={`select select-bordered w-full ${fieldErrors.season ? 'select-error' : ''}`}>
-                    <option value="">Select season</option>
-                    {SEASONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {fieldErrors.season && <label className="label"><span className="label-text-alt text-error">{fieldErrors.season}</span></label>}
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Farm Area (acres) *</span></label>
-                  <input type="number" value={form.farmArea} onChange={(e) => set('farmArea', e.target.value)} placeholder="e.g. 5" className={`input input-bordered w-full ${fieldErrors.farmArea ? 'input-error' : ''}`} min="0" step="0.1" />
-                  {fieldErrors.farmArea && <label className="label"><span className="label-text-alt text-error">{fieldErrors.farmArea}</span></label>}
-                </div>
-              </div>
-              <div className="form-control">
-                <label className="label"><span className="label-text">Insurance Number (if available)</span></label>
-                <input type="text" value={form.insuranceNumber} onChange={(e) => set('insuranceNumber', e.target.value)} placeholder="Enter policy number" className="input input-bordered w-full" />
-              </div>
+      <div className="rounded-lg border border-bone bg-pure-white p-5 sm:p-6">
+        {step === 1 && (
+          <div className="space-y-5">
+            <div>
+              <p className="eyebrow">Where is the farm</p>
+              <h2 className="mt-1 text-subheading text-ink">Location and policy</h2>
             </div>
-          )}
-
-          {/* Step 2: Crop & Damage */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Sprout className="w-5 h-5 text-primary" /> Crop & Damage Information
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Crop Type *</span></label>
-                  <select value={form.cropType} onChange={(e) => set('cropType', e.target.value)} className={`select select-bordered w-full ${fieldErrors.cropType ? 'select-error' : ''}`}>
-                    <option value="">Select crop</option>
-                    {CROP_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  {fieldErrors.cropType && <label className="label"><span className="label-text-alt text-error">{fieldErrors.cropType}</span></label>}
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Loss Reason *</span></label>
-                  <select value={form.lossReason} onChange={(e) => set('lossReason', e.target.value)} className={`select select-bordered w-full ${fieldErrors.lossReason ? 'select-error' : ''}`}>
-                    <option value="">Select reason</option>
-                    {LOSS_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  {fieldErrors.lossReason && <label className="label"><span className="label-text-alt text-error">{fieldErrors.lossReason}</span></label>}
-                </div>
-              </div>
-              <div className="form-control">
-                <label className="label"><span className="label-text">Damage Description *</span></label>
-                <textarea
-                  value={form.lossDescription}
-                  onChange={(e) => set('lossDescription', e.target.value)}
-                  placeholder="Describe the damage in detail: what happened, when, how much area is affected..."
-                  className={`textarea textarea-bordered w-full ${fieldErrors.lossDescription ? 'textarea-error' : ''}`}
-                  rows={4}
-                />
-                <label className="label">
-                  <span className={`label-text-alt ${fieldErrors.lossDescription ? 'text-error' : 'text-base-content/40'}`}>
-                    {fieldErrors.lossDescription || `${form.lossDescription.trim().length}/10 min characters`}
-                  </span>
-                </label>
-              </div>
+            <SelectField
+              label="State"
+              required
+              value={form.state}
+              onChange={(v) => set('state', v)}
+              options={INDIAN_STATES}
+              placeholder="Select state"
+              error={fieldErrors.state}
+            />
+            <div className="grid gap-5 sm:grid-cols-2">
+              <SelectField
+                label="Season"
+                required
+                value={form.season}
+                onChange={(v) => set('season', v)}
+                options={SEASONS}
+                placeholder="Select season"
+                error={fieldErrors.season}
+              />
+              <TextField
+                label="Farm area (acres)"
+                required
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.1"
+                placeholder="e.g. 5"
+                value={form.farmArea}
+                onChange={(v) => set('farmArea', v)}
+                error={fieldErrors.farmArea}
+              />
             </div>
-          )}
-
-          {/* Step 3: Review */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-primary" /> Review Your Claim
-              </h3>
-              <p className="text-sm text-base-content/60">Please review all details before submitting. You'll capture photos in the next step.</p>
-
-              <div className="bg-base-200 rounded-xl p-5 space-y-3">
-                {[
-                  { label: 'Policy', value: policy?.name || '—' },
-                  { label: 'State', value: form.state },
-                  { label: 'Season', value: form.season },
-                  { label: 'Farm Area', value: `${form.farmArea} acres` },
-                  { label: 'Insurance No.', value: form.insuranceNumber || 'N/A' },
-                  { label: 'Crop Type', value: form.cropType },
-                  { label: 'Loss Reason', value: form.lossReason },
-                  { label: 'Description', value: form.lossDescription },
-                ].map((r) => (
-                  <div key={r.label} className="flex justify-between text-sm">
-                    <span className="text-base-content/60">{r.label}</span>
-                    <span className="font-medium text-base-content max-w-[60%] text-right">{r.value}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="alert alert-info">
-                <Camera className="w-5 h-5" />
-                <span>After submission, you'll be redirected to capture GPS-tagged photos of the damage.</span>
-              </div>
-            </div>
-          )}
-
-          {/* Navigation buttons */}
-          <div className="flex justify-between mt-6 pt-4 border-t border-base-300">
-            {step > 1 ? (
-              <button onClick={() => setStep(step - 1)} className="btn btn-ghost gap-2">
-                <ArrowLeft className="w-4 h-4" /> Previous
-              </button>
-            ) : <div />}
-
-            {step < 3 ? (
-              <button onClick={goNext} disabled={!canNext()} className="btn btn-primary gap-2">
-                Next <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <button onClick={handleSubmit} disabled={submitting} className="btn btn-primary gap-2">
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                {submitting ? 'Submitting...' : 'Submit & Capture Photos'}
-              </button>
-            )}
+            <TextField
+              label="Policy number"
+              placeholder="Printed on your policy document"
+              hint="Optional — leave blank if you do not have it to hand."
+              value={form.insuranceNumber}
+              onChange={(v) => set('insuranceNumber', v)}
+            />
           </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-5">
+            <div>
+              <p className="eyebrow">What happened</p>
+              <h2 className="mt-1 text-subheading text-ink">Crop and damage</h2>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <SelectField
+                label="Crop"
+                required
+                value={form.cropType}
+                onChange={(v) => set('cropType', v)}
+                options={CROP_TYPES}
+                placeholder="Select crop"
+                error={fieldErrors.cropType}
+              />
+              <SelectField
+                label="Cause of loss"
+                required
+                value={form.lossReason}
+                onChange={(v) => set('lossReason', v)}
+                options={LOSS_REASONS.map((r) => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1) }))}
+                placeholder="Select cause"
+                error={fieldErrors.lossReason}
+              />
+            </div>
+            <TextAreaField
+              label="Describe the damage"
+              required
+              rows={5}
+              value={form.lossDescription}
+              onChange={(v) => set('lossDescription', v)}
+              error={fieldErrors.lossDescription}
+              hint={
+                form.lossDescription.trim().length >= MIN_DESCRIPTION
+                  ? `${form.lossDescription.trim().length} characters`
+                  : `What happened, when, and how much of the field is affected. At least ${MIN_DESCRIPTION} characters.`
+              }
+              placeholder="For example: heavy hail on 12 August flattened roughly half the field near the north boundary."
+            />
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-5">
+            <div>
+              <p className="eyebrow">Last look</p>
+              <h2 className="mt-1 text-subheading text-ink">Review your claim</h2>
+              <p className="mt-1 text-body text-bark">
+                Check these details. You will photograph the damage in the next step.
+              </p>
+            </div>
+
+            <dl className="divide-y divide-bone rounded-lg border border-bone bg-parchment px-4">
+              {reviewRows.map((r) => (
+                <div key={r.label} className="flex flex-wrap items-baseline justify-between gap-2 py-3">
+                  <dt className="label-micro">{r.label}</dt>
+                  <dd className="text-right text-body font-medium capitalize text-ink">{r.value}</dd>
+                </div>
+              ))}
+              <div className="py-3">
+                <dt className="label-micro">Description</dt>
+                <dd className="mt-1 text-body text-ink">{form.lossDescription}</dd>
+              </div>
+            </dl>
+
+            <p className="flex items-start gap-2 rounded-md border border-bone bg-parchment px-4 py-3 text-body text-saddle">
+              <Camera className="mt-0.5 h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+              Next you will take GPS-tagged photos of your field and the damage. Have your phone with you in the
+              field before you continue.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-6 flex items-center justify-between gap-3 border-t border-bone pt-5">
+          {step > 1 ? (
+            <button type="button" onClick={goBack} className="btn btn-outline">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back
+            </button>
+          ) : (
+            <span />
+          )}
+
+          {step < 3 ? (
+            <button type="button" onClick={goNext} className="btn btn-primary">
+              Continue <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : (
+            <button type="button" onClick={() => setConfirmOpen(true)} disabled={submitting} className="btn btn-primary">
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              Submit claim
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Submitting opens a claim record against a real policy, so it now asks
+          first and shows exactly what is being filed. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        busy={submitting}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={handleSubmit}
+        title="Submit this claim?"
+        description="This opens a claim on your policy and takes you to photo capture. You can still add photos afterwards, but the claim details above are recorded now."
+        summary={[
+          { label: 'Policy', value: policy?.name || '—' },
+          { label: 'Crop', value: form.cropType },
+          { label: 'Area', value: `${form.farmArea} acres` },
+          { label: 'Cause', value: form.lossReason },
+        ]}
+        confirmLabel="Submit and capture photos"
+      />
     </div>
   );
 }
