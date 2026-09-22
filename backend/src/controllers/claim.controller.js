@@ -11,6 +11,7 @@ const {
   determineDecision,
   undeterminedDecision,
   readPipelinePayout,
+  readPipelineConfidence,
   isPipelineAvailable,
 } = require('../services/python.service');
 const { summarizeClaimResult, isAvailable: isGeminiAvailable } = require('../services/gemini.service');
@@ -96,17 +97,20 @@ const schemeMaxAmount = (policy, claim) => {
 /**
  * Sum insured for a claim, taken from the policy it was filed against.
  *
- * Stored policies win, then the seed policies policy.controller.js serves while
- * the Policy collection is empty - a claim filed against one of those must be
- * scaled on the coverage the farmer was actually quoted, since that is the
- * out-of-box state of a fresh deployment. Only a genuinely unresolvable
- * reference falls back to DEFAULT_SUM_INSURED (100000), and says so in the log,
- * because a silently wrong sum insured scales the payout.
+ * Stored policies win. The seed policies are consulted only under the same
+ * condition that makes policy.controller.js serve them - no active policy in
+ * the database - because that is the deployment where the farmer was actually
+ * quoted seed coverage. A database that holds policies but not this one is a
+ * genuinely unresolvable reference, and falls back to DEFAULT_SUM_INSURED
+ * (100000) with a warning rather than to a demo figure, because a silently
+ * wrong sum insured scales the payout.
  */
 const resolveSumInsured = async (claim) => {
   const fallback = Number(process.env.DEFAULT_SUM_INSURED) || 100000;
   const reference = claim.policyId || claim.insuranceId;
   if (!reference) return { sumInsured: fallback, source: 'default' };
+
+  let policiesAreSeeded = !isDbConnected();
 
   if (isDbConnected()) {
     try {
@@ -116,16 +120,19 @@ const resolveSumInsured = async (claim) => {
       const policy = await Policy.findOne(query);
       const maxAmount = schemeMaxAmount(policy, claim);
       if (maxAmount) return { sumInsured: maxAmount, source: `policy:${policy.code}` };
+      policiesAreSeeded = (await Policy.countDocuments({ isActive: true })) === 0;
     } catch (err) {
       console.warn(`[CLAIM] Policy lookup failed for "${reference}":`, err.message);
     }
   }
 
-  const seed = SEED_POLICIES.find(
-    (p) => p._id === String(reference) || p.code === String(reference).toUpperCase()
-  );
-  const seedAmount = schemeMaxAmount(seed, claim);
-  if (seedAmount) return { sumInsured: seedAmount, source: `seed:${seed.code}` };
+  if (policiesAreSeeded) {
+    const seed = SEED_POLICIES.find(
+      (p) => p._id === String(reference) || p.code === String(reference).toUpperCase()
+    );
+    const seedAmount = schemeMaxAmount(seed, claim);
+    if (seedAmount) return { sumInsured: seedAmount, source: `seed:${seed.code}` };
+  }
 
   console.warn(`[CLAIM] No policy matched "${reference}", using default sum insured ${fallback}`);
   return { sumInsured: fallback, source: 'default' };
@@ -354,7 +361,7 @@ exports.completeClaim = async (req, res) => {
       }
     }
 
-    const confidence = Number(pythonResult.overall_assessment?.confidence_score);
+    const confidence = readPipelineConfidence(pythonResult);
     const payoutAmount = decision.payout_approved ? readPipelinePayout(pythonResult) : 0;
 
     const processingResult = {
@@ -388,19 +395,20 @@ exports.completeClaim = async (req, res) => {
     const finalStatus =
       decision.status === 'approved' ? 'approved' : decision.status === 'rejected' ? 'rejected' : 'manual_review';
 
-    const update = {
-      processingResult,
+    // What the pipeline measured is true whoever decides the claim, so it is
+    // always recorded. The verdict it implies is contested: a reviewer who
+    // decided the claim while the run was in flight owns that, and only a claim
+    // still in 'processing' takes the automated one.
+    const evidence = { processingResult, confidenceScore: confidence };
+    const verdict = {
       status: finalStatus,
-      confidenceScore: Number.isFinite(confidence) ? confidence : null,
       payoutAmount,
       payoutStatus: payoutAmount > 0 ? 'pending' : 'none',
       rejectionReason: finalStatus === 'rejected' ? decision.reason : '',
       completedAt: new Date(),
     };
+    const update = { ...evidence, ...verdict };
 
-    // Only a claim still in 'processing' gets the automated verdict. A reviewer
-    // who decided it while the pipeline ran owns the outcome, and their decision
-    // (and payout) must not be overwritten by a run that started before it.
     let appliedStatus = finalStatus;
     let decisionApplied = true;
 
@@ -408,10 +416,10 @@ exports.completeClaim = async (req, res) => {
       const persisted = await Claim.findOneAndUpdate({ documentId, status: 'processing' }, update, { new: true });
       decisionApplied = Boolean(persisted);
       if (!decisionApplied) {
-        const current = await Claim.findOne({ documentId });
+        const current = await Claim.findOneAndUpdate({ documentId }, evidence, { new: true });
         appliedStatus = current?.status || claim.status;
         console.warn(
-          `[CLAIM:COMPLETE] ${documentId}: claim is ${appliedStatus} and no longer processing, discarding the automated ${finalStatus} verdict`
+          `[CLAIM:COMPLETE] ${documentId}: claim is ${appliedStatus} and no longer processing, keeping that decision and recording the analysis evidence only (automated verdict would have been ${finalStatus})`
         );
       }
     } else {

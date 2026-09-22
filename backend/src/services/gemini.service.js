@@ -6,8 +6,6 @@
  */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fs = require('fs');
-const path = require('path');
 
 const API_KEY = process.env.GEMINI_API_KEY;
 let genAI = null;
@@ -77,58 +75,6 @@ const summarizeClaimResult = async (processingResult, claimInfo = {}) => {
   } catch (err) {
     console.error('[GEMINI] Summarization failed, using fallback summary:', err.message);
     return fallbackSummary(processingResult, claimInfo);
-  }
-};
-
-/**
- * Analyze a crop damage image using Gemini Vision.
- *
- * @param {string} imagePath – absolute path to the image file
- * @param {object} context   – optional context (cropType, season, etc.)
- * @returns {Promise<object>} – { description, damageEstimate, cropHealth, confidence }
- */
-const analyzeImage = async (imagePath, context = {}) => {
-  if (!model) {
-    return { description: 'AI image analysis unavailable', damageEstimate: null, confidence: 0 };
-  }
-
-  try {
-    const imageData = fs.readFileSync(imagePath);
-    const base64 = imageData.toString('base64');
-    const ext = path.extname(imagePath).toLowerCase();
-    const mimeType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-
-    const visionModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const result = await visionModel.generateContent([
-      {
-        inlineData: { data: base64, mimeType },
-      },
-      `You are an expert crop damage assessor for agricultural insurance.
-Analyze this crop image and provide a JSON response:
-{
-  "description": "Brief description of what you see",
-  "cropHealth": "healthy | stressed | damaged | severely_damaged | dead",
-  "damageEstimate": <number 0-100>,
-  "damageType": "drought | flood | pest | disease | hail | healthy | unknown",
-  "confidence": <number 0.0-1.0>,
-  "observations": ["observation1", "observation2"]
-}
-${context.cropType ? `Crop type: ${context.cropType}` : ''}
-${context.season ? `Season: ${context.season}` : ''}
-Respond with ONLY the JSON object.`,
-    ]);
-
-    const text = result.response.text();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try { return { ...JSON.parse(jsonMatch[0]), analyzedBy: 'gemini-1.5-flash' }; } catch { /* fallthrough */ }
-    }
-
-    return { description: text.trim(), damageEstimate: null, confidence: 0.5, analyzedBy: 'gemini-1.5-flash' };
-  } catch (err) {
-    console.error('[GEMINI] Image analysis failed:', err.message);
-    return { description: 'Image analysis failed', damageEstimate: null, confidence: 0, error: err.message };
   }
 };
 
@@ -254,4 +200,4 @@ function fallbackSummary(pr, info) {
   };
 }
 
-module.exports = { isAvailable, summarizeClaimResult, analyzeImage };
+module.exports = { isAvailable, summarizeClaimResult };

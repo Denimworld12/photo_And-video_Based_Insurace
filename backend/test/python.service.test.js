@@ -17,6 +17,7 @@ const {
   determineDecision,
   undeterminedDecision,
   readPipelinePayout,
+  readPipelineConfidence,
   fallbackResult,
   runPipeline,
   PipelineError,
@@ -105,6 +106,20 @@ test('fallbackResult invents no damage figure and no payout', () => {
   assert.strictEqual(result.damage_assessment.ai_calculated_damage_percent, null);
   assert.strictEqual(result.damage_assessment.final_damage_percent, null);
   assert.strictEqual(readPipelinePayout(result), 0);
+});
+
+test('readPipelineConfidence records no measurement rather than a fabricated zero', () => {
+  // Number(null) is 0, which persisted "0% confidence" on a claim the pipeline
+  // never assessed, and a reviewer read that as a measurement.
+  assert.strictEqual(readPipelineConfidence(fallbackResult('pipeline crashed', 'exit_code')), null);
+  assert.strictEqual(readPipelineConfidence({ overall_assessment: {} }), null);
+  assert.strictEqual(readPipelineConfidence({ overall_assessment: { confidence_score: '0.8' } }), null);
+  assert.strictEqual(readPipelineConfidence({}), null);
+});
+
+test('readPipelineConfidence keeps a measured score, including a genuine zero', () => {
+  assert.strictEqual(readPipelineConfidence({ overall_assessment: { confidence_score: 0.82 } }), 0.82);
+  assert.strictEqual(readPipelineConfidence({ overall_assessment: { confidence_score: 0 } }), 0);
 });
 
 test('a failed pipeline run never produces an automatic approval or rejection', () => {

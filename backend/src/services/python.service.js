@@ -84,6 +84,18 @@ const readPipelinePayout = (result) => {
 };
 
 /**
+ * Read the confidence the pipeline measured, or null when it measured none.
+ *
+ * Number(null) is 0, so coercing the fallback result's deliberate null would
+ * record a fabricated "0% confidence" against a claim the pipeline never
+ * assessed. Only an actual number counts as a measurement.
+ */
+const readPipelineConfidence = (result) => {
+  const score = result?.overall_assessment?.confidence_score;
+  return typeof score === 'number' && Number.isFinite(score) ? score : null;
+};
+
+/**
  * Run the crop-damage analysis pipeline.
  *
  * @param {string[]} imagePaths   – absolute paths to uploaded images
@@ -131,21 +143,22 @@ const runPipeline = (imagePaths, opts = {}) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
-    let killTimer = null;
 
     const settle = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      clearTimeout(killTimer);
       fn(value);
     };
 
     const timer = setTimeout(() => {
       py.kill('SIGTERM');
-      // SIGTERM can be ignored by a wedged interpreter; make sure it goes away.
-      killTimer = setTimeout(() => py.kill('SIGKILL'), KILL_GRACE_MS);
       settle(reject, new PipelineError(`Pipeline timed out after ${TIMEOUT_MS} ms`, 'timeout'));
+      // SIGTERM can be ignored by an interpreter wedged in a C extension or a
+      // blocking socket read, so the escalation is armed after settling - it
+      // must outlive the rejection, or the child is never reaped. unref() keeps
+      // it from holding the event loop open.
+      setTimeout(() => py.kill('SIGKILL'), KILL_GRACE_MS).unref();
     }, TIMEOUT_MS);
 
     py.stdout.on('data', (d) => {
@@ -294,6 +307,7 @@ module.exports = {
   determineDecision,
   undeterminedDecision,
   readPipelinePayout,
+  readPipelineConfidence,
   assertUsableResult,
   PipelineError,
   PIPELINE_PATH,

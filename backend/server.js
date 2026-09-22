@@ -70,18 +70,10 @@ try {
 if (process.env.TRUST_PROXY) {
   const raw = process.env.TRUST_PROXY.trim();
   const hops = Number(raw);
-  const setting =
-    raw === 'true' ? true : raw === 'false' ? false : Number.isInteger(hops) && hops >= 0 ? hops : raw;
-  try {
-    // Express compiles this eagerly, so an unusable value is caught here rather
-    // than surfacing as an opaque TypeError from proxy-addr.
-    app.set('trust proxy', setting);
-  } catch (err) {
-    fatal(
-      `TRUST_PROXY="${raw}" is not a usable trust proxy setting (${err.message}). ` +
-        'Use a hop count (e.g. 1), true/false, or a comma-separated list of trusted addresses.'
-    );
+  if (!Number.isInteger(hops) || hops < 0) {
+    fatal(`TRUST_PROXY must be a non-negative hop count (e.g. 1); got "${raw}"`);
   }
+  app.set('trust proxy', hops);
 }
 
 app.use(
@@ -290,12 +282,12 @@ server = app.listen(PORT, () => {
   if (isMockMode()) {
     console.log('  OTP delivery:  MOCK - no SMS is sent, the code is returned in the send-otp response');
   } else {
-    console.log('  OTP delivery:  SMS (Twilio)');
+    console.log('  OTP delivery:  NOT IMPLEMENTED');
   }
   console.log('');
-  if (IS_PRODUCTION && !isMockMode()) {
+  if (!isMockMode()) {
     console.error('  ############################################################');
-    console.error('  WARNING: PRODUCTION OTP DELIVERY IS NOT WIRED.');
+    console.error('  WARNING: OTP DELIVERY IS NOT WIRED.');
     console.error('  The Twilio send block in src/services/otp.service.js is still');
     console.error('  commented out, so POST /api/auth/send-otp reports success');
     console.error('  without sending any SMS. No account - including the admin');
