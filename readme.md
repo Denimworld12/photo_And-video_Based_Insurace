@@ -146,17 +146,15 @@ agri-insurance/
 │       ├── routes/                One router per controller, mounted under /api
 │       └── services/              cloudinary, gemini, otp, python (spawns the pipeline)
 │
-├── cropfarmPY/
-│   ├── main_pipeline.py           CLI entry point the backend spawns
-│   ├── modules/                   Damage, EXIF area, fraud, geolocation, weather
-│   ├── requirements.txt           numpy, opencv-python, Pillow
-│   ├── config.pkl                 Pre-computed pipeline configuration
-│   ├── input_samples/             Example inputs
-│   └── test_images/               Fixtures for manual pipeline runs
+├── pipeline.py                      # Standalone AI pipeline (not called by the backend)
+├── README.md                        # This file
 │
-├── frontend/
-│   ├── craco.config.js            Patches every postcss-loader for Tailwind v4
-│   ├── public/                    index.html, manifest.json, service-worker.js, images
+├── backend/                         # Node.js Express API Server
+│   ├── server.js                    # Entry point — Express app setup (v4.0.0)
+│   ├── package.json                 # Node dependencies & scripts
+│   ├── .env.example                 # Environment variable template
+│   ├── data/                        # Local data files
+│   ├── test/                        # node --test suites (npm test)
 │   └── src/
 │       ├── index.css              THE design system: palette, type scale, daisyUI theme
 │       ├── App.js                 Routes and the role-aware route guard
@@ -193,13 +191,23 @@ agri-insurance/
 
 ### Accounts you will need
 
-| Service | Used for | Required? |
-|---------|----------|-----------|
-| [MongoDB Atlas](https://www.mongodb.com/atlas) | Database | Yes |
-| [Cloudinary](https://cloudinary.com/) | Storing claim photos | Yes |
-| [Twilio](https://www.twilio.com/) | Sending OTP by SMS | No — see `OTP_MOCK_MODE` |
-| [Google AI Studio](https://aistudio.google.com/) | Gemini claim summaries | No — the summary feature is simply unavailable without it |
-| [OpenWeather](https://openweathermap.org/api) or similar | Weather cross-referencing | No — the pipeline skips the weather check without a key |
+| Software | Version | Download |
+|----------|---------|----------|
+| **Node.js** | 18.x or later | [nodejs.org](https://nodejs.org/) |
+| **npm** | 9.x or later | Comes with Node.js |
+| **Python** | 3.8 or later | [python.org](https://www.python.org/downloads/) |
+| **Git** | Latest | [git-scm.com](https://git-scm.com/) |
+
+### Required Accounts / API Keys
+
+| Service | Purpose | Sign Up |
+|---------|---------|---------|
+| **MongoDB Atlas** | Cloud database | [mongodb.com/atlas](https://www.mongodb.com/atlas) |
+| **Cloudinary** | Image/video cloud storage | [cloudinary.com](https://cloudinary.com/) |
+| **Twilio** | SMS OTP authentication | [twilio.com](https://www.twilio.com/) |
+| **Google AI Studio** | Gemini AI API key | [aistudio.google.com](https://aistudio.google.com/) |
+
+> **Note:** For local development, `OTP_MOCK_MODE=true` skips Twilio and returns the OTP in the send-otp response. Mock mode is refused when `NODE_ENV=production`.
 
 ---
 
@@ -242,19 +250,50 @@ cd cropfarmPY
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python -c "import cv2, numpy, PIL; print('pipeline dependencies OK')"
+
+# Verify installation
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
+
+# Deactivate when done
 deactivate
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
+# Navigate to the cropfarmPY directory
+cd cropfarmPY
+
+# Create a Python virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+venv\Scripts\Activate.ps1
+# If you get a script execution policy error, run:
+# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# Install required packages
+pip install -r requirements.txt
+
+# Verify installation
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
+
+# Deactivate when done
+deactivate
+```
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows (CMD)</strong></summary>
+
+```cmd
 cd cropfarmPY
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 # If blocked: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 pip install -r requirements.txt
-python -c "import cv2, numpy, PIL; print('pipeline dependencies OK')"
+python -c "import numpy; import cv2; import requests; from PIL import Image; print('All packages installed successfully!')"
 deactivate
 ```
 
@@ -336,9 +375,43 @@ All of these live in `backend/.env`. Copy `backend/.env.example` as your startin
 
 `frontend/.env` and `frontend/.env.production` hold a single variable:
 
-| Variable | Notes |
-|----------|-------|
-| `REACT_APP_API_URL` | The backend origin. Baked into the bundle at build time, so changing it requires a rebuild. **`.env.production` still contains the placeholder `https://your-backend-url.herokuapp.com` — set it before building for production.** |
+## 🔐 Environment Variables Reference
+
+### Backend (`backend/.env`)
+
+Create this file by copying `.env.example`, which is the authoritative and complete list of backend settings (including `TRUST_PROXY`, `DEFAULT_SUM_INSURED`, `MAX_RESUBMISSIONS` and `PYTHON_PIPELINE_TIMEOUT_MS`). The most common ones:
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `PORT` | No | Server port (default: 5001) | `5001` |
+| `NODE_ENV` | No | Environment mode | `development` |
+| `MONGODB_URI` | **Production** | MongoDB Atlas connection string (without it, development runs on seed data and in-memory claims) | `mongodb+srv://user:pass@cluster.mongodb.net/agriinsure` |
+| `JWT_SECRET` | **Yes** | Secret key for JWT tokens (min 32 chars, enforced in production) | `your-super-secret-key-here-min-32-chars` |
+| `JWT_EXPIRES_IN` | No | Token expiration time | `7d` |
+| `CLOUDINARY_CLOUD_NAME` | **Yes** | Cloudinary cloud name | `your-cloud-name` |
+| `CLOUDINARY_API_KEY` | **Yes** | Cloudinary API key | `123456789012345` |
+| `CLOUDINARY_API_SECRET` | **Yes** | Cloudinary API secret | `abcdefghijk...` |
+| `TWILIO_ACCOUNT_SID` | **Yes*** | Twilio account SID | `ACxxxxxxxxxxxxxxx` |
+| `TWILIO_AUTH_TOKEN` | **Yes*** | Twilio auth token | `your-twilio-auth-token` |
+| `TWILIO_PHONE_NUMBER` | **Yes*** | Twilio phone number | `+1234567890` |
+| `GEMINI_API_KEY` | **Yes** | Google Gemini AI API key | `AIzaSy...` |
+| `FRONTEND_URL` | No | Frontend URL for CORS | `http://localhost:3000` |
+| `ALLOWED_ORIGINS` | **Production** | Comma-separated allowed origins | `http://localhost:3000` |
+| `PYTHON_COMMAND` | No | Python binary path | `python3` |
+| `WEATHER_API_KEY` | No | Weather API key (Open-Meteo is free) | — |
+| `MAX_FILE_SIZE` | No | Max upload size in bytes | `52428800` (50MB) |
+| `ADMIN_PHONE_NUMBER` | No | Phone number granted the admin role at login; unset means no admin | `+917777777777` |
+| `OTP_MOCK_MODE` | No | Skip real SMS and return the OTP in the response (refused in production) | `true` |
+| `CLAIM_AUTO_APPROVE_THRESHOLD` | No | Auto-approve confidence threshold (0-1) | `0.7` |
+| `CLAIM_REJECT_THRESHOLD` | No | Auto-reject confidence threshold (0-1) | `0.3` |
+
+> *Twilio variables are optional if `OTP_MOCK_MODE=true`
+
+### Frontend (`frontend/.env`)
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `REACT_APP_API_URL` | **Yes** | Backend API base URL | `http://localhost:5001` |
 
 ---
 
@@ -367,7 +440,82 @@ admin portal at `/admin`.
 Every route is mounted under `/api`. All except `/api/auth/send-otp`, `/api/auth/verify-otp` and the public policy
 reads require an `Authorization: Bearer <token>` header. `/api/admin/*` additionally requires the `admin` role.
 
-### Auth — `/api/auth`
+## 📖 File Reference
+
+### Backend Files
+
+| File | Description |
+|------|-------------|
+| `server.js` | Express app entry point — middleware setup, route mounting, graceful shutdown |
+| `src/config/database.js` | MongoDB connection with Mongoose, retry logic |
+| `src/controllers/auth.controller.js` | OTP send/verify, user registration, JWT issuance |
+| `src/controllers/claim.controller.js` | Claim creation, image upload to Cloudinary, Python pipeline invocation, AI scoring |
+| `src/controllers/policy.controller.js` | Policy CRUD, purchase flow |
+| `src/controllers/admin.controller.js` | Admin dashboard stats, claim verification actions |
+| `src/controllers/user.controller.js` | Profile retrieval and updates |
+| `src/controllers/notification.controller.js` | Notification management |
+| `src/models/User.js` | User schema — phone, name, role (user/admin), farm details |
+| `src/models/Policy.js` | Policy schema — crop type, coverage, premium, terms |
+| `src/models/Claim.js` | Claim schema — evidence images, GPS, AI scores, status |
+| `src/models/Notification.js` | Notification schema — type, message, read status |
+| `src/models/AdminAction.js` | Admin action log schema — who, what, when |
+| `src/services/cloudinary.service.js` | Cloudinary upload/delete with transformations |
+| `src/services/gemini.service.js` | Gemini AI prompt engineering for damage analysis |
+| `src/services/otp.service.js` | Twilio SMS OTP send/verify with mock mode |
+| `src/services/python.service.js` | Spawns Python child process for pipeline analysis |
+| `src/middleware/auth.js` | JWT token verification and user extraction |
+| `src/middleware/roleGuard.js` | Role-based access (user vs admin) |
+| `src/middleware/upload.js` | Multer config — file size limits, allowed types |
+| `src/middleware/validate.js` | Joi schema validation middleware |
+
+### Python Pipeline Files
+
+| File | Description |
+|------|-------------|
+| `pipeline.py` (root) | Standalone pipeline, not invoked by the backend — EXIF GPS extraction, coordinate matching, geofencing with Shapely, weather cross-reference, PyTorch AI damage classification. Runs in fallback mode without optional deps. |
+| `cropfarmPY/main_pipeline.py` | RGB vegetation-index pipeline the backend runs; its module docstring documents the stdout JSON contract — Excess Green/Red Index analysis, damage percentage scoring, orchestrates all modules |
+| `cropfarmPY/modules/crop_damage_insurance.py` | Core damage assessment — vegetation indices, coverage calculation |
+| `cropfarmPY/modules/exif_area_calculator.py` | Extracts GPS from EXIF, calculates farm area from photo coordinates |
+| `cropfarmPY/modules/fraud_detector.py` | Detects image manipulation — metadata inconsistencies, copy-move detection |
+| `cropfarmPY/modules/geolocation_verifier.py` | Verifies photo location matches claimed farm coordinates |
+| `cropfarmPY/modules/weather_verifier.py` | Cross-references claim date/location with actual weather data |
+
+### Frontend Files
+
+| File | Description |
+|------|-------------|
+| `src/App.js` | Root component — all routes and layout structure |
+| `src/index.js` | Entry point — renders App, registers service worker |
+| `src/index.css` | Global styles — Tailwind v4, DaisyUI plugin, Safari fixes |
+| `src/serviceWorkerRegistration.js` | PWA service worker registration logic |
+| `src/pages/Landing.js` | Public landing page — hero, features, team, CTA |
+| `src/pages/auth/Login.js` | OTP-based phone authentication |
+| `src/pages/user/Dashboard.js` | Farmer dashboard — stats, quick actions, recent claims |
+| `src/pages/user/Policies.js` | Browse and purchase insurance policies |
+| `src/pages/user/SubmitClaim.js` | Multi-step claim submission wizard |
+| `src/pages/user/MediaCapture.js` | Camera capture / file upload for evidence photos |
+| `src/pages/user/ClaimStatus.js` | Track submitted claim progress |
+| `src/pages/user/ClaimResults.js` | View AI-generated analysis results |
+| `src/pages/user/Profile.js` | User profile management |
+| `src/pages/user/Settings.js` | App settings, theme selection |
+| `src/pages/user/Notifications.js` | Notification center |
+| `src/pages/user/AppInstallGuide.js` | PWA installation guide with platform-specific instructions |
+| `src/pages/admin/AdminDashboard.js` | Admin analytics — charts, stats, pending claims |
+| `src/pages/admin/ClaimVerification.js` | Review claims — view evidence, AI scores, approve/reject |
+| `src/pages/admin/PolicyManagement.js` | Create/edit/archive insurance policies |
+| `src/pages/admin/UserManagement.js` | View/manage registered users |
+| `src/pages/admin/ActivityLogs.js` | Admin action history and audit trail |
+| `src/components/layouts/UserLayout.js` | Farmer sidebar navigation layout |
+| `src/components/layouts/AdminLayout.js` | Admin sidebar navigation layout |
+| `src/components/ProtectedRoute.js` | Auth guard — redirects unauthenticated users |
+| `src/components/ThemeSwitcher.js` | Theme dropdown (5 DaisyUI themes) |
+| `src/contexts/AuthContext.js` | Authentication state provider (JWT, user data) |
+| `src/contexts/ClaimContext.js` | Claim wizard state management |
+| `src/contexts/ThemeContext.js` | Theme persistence (localStorage) |
+| `src/hooks/usePWAInstall.js` | PWA install prompt hook (beforeinstallprompt) |
+| `src/utils/api.js` | Axios instance with auth interceptor |
+| `src/utils/config.js` | Runtime config helpers, env variable access |
+| `src/utils/constants.js` | App-wide constants (crop types, statuses, etc.) |
 
 | Method | Path | Purpose |
 |--------|------|---------|
