@@ -16,7 +16,6 @@ const EMPTY_POLICY = {
   schemes: [],
   availableStates: [],
   premiumRate: '',
-  isActive: true,
 };
 
 const TYPES = [
@@ -71,7 +70,6 @@ export default function PolicyManagement() {
       schemes: p.schemes || [],
       availableStates: p.availableStates || [],
       premiumRate: p.premiumRate ?? '',
-      isActive: p.isActive ?? true,
     });
     setFormErrors({});
     setEditing(p._id);
@@ -180,11 +178,6 @@ export default function PolicyManagement() {
                   <span className="rounded-md border border-bone px-2 py-0.5 text-caption capitalize text-bark">
                     {p.type}
                   </span>
-                  {!p.isActive && (
-                    <span className="rounded-md border border-saddle bg-saddle/10 px-2 py-0.5 text-caption text-saddle">
-                      Not published
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -278,20 +271,10 @@ export default function PolicyManagement() {
             onChange={(v) => set('shortDescription', v)}
           />
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-bone bg-parchment p-3">
-            <input
-              type="checkbox"
-              checked={form.isActive}
-              onChange={(e) => set('isActive', e.target.checked)}
-              className="checkbox checkbox-sm mt-0.5"
-            />
-            <span className="min-w-0">
-              <span className="block text-body font-medium text-ink">Published</span>
-              <span className="block text-body text-bark">
-                Published policies are visible to farmers and can be claimed against.
-              </span>
-            </span>
-          </label>
+          <p className="rounded-md border border-bone bg-parchment p-3 text-body text-bark">
+            Policies saved here are published: farmers can see them and file claims against them. Use Delete to
+            withdraw one.
+          </p>
         </div>
       </Modal>
 

@@ -11,7 +11,7 @@ const EMPTY = {
   fullName: '',
   email: '',
   address: { village: '', district: '', state: '', pincode: '' },
-  farmDetails: { totalArea: '', primaryCrop: '', soilType: '' },
+  farmDetails: { totalArea: '' },
 };
 
 export default function Profile() {
@@ -40,11 +40,7 @@ export default function Profile() {
             state: u.address?.state || '',
             pincode: u.address?.pincode || '',
           },
-          farmDetails: {
-            totalArea: u.farmDetails?.totalArea || '',
-            primaryCrop: u.farmDetails?.primaryCrop || '',
-            soilType: u.farmDetails?.soilType || '',
-          },
+          farmDetails: { totalArea: u.farmDetails?.totalArea ?? '' },
         });
       }
     } catch (err) {
@@ -75,11 +71,36 @@ export default function Profile() {
     return Object.keys(next).length === 0;
   };
 
+  /**
+   * PUT /api/user/profile is Joi-validated and every optional field rejects an
+   * empty string, so a farmer with any blank field could never save. Only the
+   * fields they have actually filled in are sent.
+   */
+  const buildPayload = () => {
+    const payload = {};
+    const name = form.fullName.trim();
+    const email = form.email.trim();
+    if (name) payload.fullName = name;
+    if (email) payload.email = email;
+
+    const address = Object.entries(form.address).reduce((acc, [key, value]) => {
+      const trimmed = (value || '').trim();
+      if (trimmed) acc[key] = trimmed;
+      return acc;
+    }, {});
+    if (Object.keys(address).length) payload.address = address;
+
+    const totalArea = String(form.farmDetails.totalArea).trim();
+    if (totalArea) payload.farmDetails = { totalArea: parseFloat(totalArea) };
+
+    return payload;
+  };
+
   const handleSave = async () => {
     if (!validate()) return;
     try {
       setSaving(true);
-      const { data } = await api.put('/api/user/profile', form);
+      const { data } = await api.put('/api/user/profile', buildPayload());
       if (data.success) {
         // Was calling login(token, user) to refresh the cached profile, which
         // re-ran the whole sign-in path just to change a name.
@@ -87,10 +108,13 @@ export default function Profile() {
         setEditing(false);
         toast.success('Profile saved.');
       } else {
-        toast.error(data.message || 'We could not save your profile. Try again.');
+        toast.error(data.error || 'We could not save your profile. Try again.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'We could not save your profile. Try again in a moment.');
+      const body = err.response?.data;
+      toast.error(
+        body?.details?.join('. ') || body?.error || 'We could not save your profile. Try again in a moment.'
+      );
     } finally {
       setSaving(false);
     }
@@ -222,8 +246,6 @@ export default function Profile() {
         <div className="mt-4 grid gap-5 sm:grid-cols-2">
           {[
             { key: 'totalArea', label: 'Total farm area (acres)', type: 'number', inputMode: 'decimal' },
-            { key: 'primaryCrop', label: 'Primary crop' },
-            { key: 'soilType', label: 'Soil type' },
           ].map((f) =>
             editing ? (
               <TextField

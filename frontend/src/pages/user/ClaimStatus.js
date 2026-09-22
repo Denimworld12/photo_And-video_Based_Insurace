@@ -11,24 +11,13 @@ import { ErrorState, EmptyState, SkeletonList } from '../../components/ui/States
 import { useToast } from '../../components/ui/Toast';
 import { ClipboardList, Search, Plus, RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 
-const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'submitted', label: 'Submitted' },
-  { key: 'processing', label: 'Processing' },
-  { key: 'manual_review', label: 'Under review' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'rejected', label: 'Rejected' },
-  { key: 'payout-complete', label: 'Paid' },
-];
-
 export default function ClaimStatus() {
   const navigate = useNavigate();
   const toast = useToast();
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, pages: 1 });
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
   const [resubmitting, setResubmitting] = useState(null);
@@ -38,18 +27,16 @@ export default function ClaimStatus() {
     try {
       setLoading(true);
       setError(null);
-      const { data } = await api.get('/api/claims/list', {
-        params: { filter: filter !== 'all' ? filter : undefined, page, limit: 10 },
-      });
+      const { data } = await api.get('/api/claims/list', { params: { page, limit: 10 } });
       setClaims(data.claims || []);
-      setTotalPages(data.totalPages || 1);
+      setPagination(data.pagination || { total: 0, pages: 1 });
     } catch (err) {
       setError(err.response?.data?.error || 'We could not load your claims. Check your connection and try again.');
       setClaims([]);
     } finally {
       setLoading(false);
     }
-  }, [filter, page]);
+  }, [page]);
 
   useEffect(() => {
     fetchClaims();
@@ -82,7 +69,7 @@ export default function ClaimStatus() {
   const filtered = query
     ? claims.filter((c) => {
         const docId = (c.documentId || '').toLowerCase();
-        const crop = (c.cropType || c.formData?.cropType || '').toLowerCase();
+        const crop = (c.cropType || '').toLowerCase();
         return docId.includes(query) || crop.includes(query);
       })
     : claims;
@@ -100,46 +87,15 @@ export default function ClaimStatus() {
         }
       />
 
-      <div className="space-y-3">
-        <div className="max-w-md">
-          <TextField
-            label="Search"
-            icon={Search}
-            type="search"
-            placeholder="Claim ID or crop"
-            value={search}
-            onChange={setSearch}
-          />
-        </div>
-        {/* Seven filter chips wrapped onto three lines on a phone. They now
-            scroll horizontally on one line and stay above the fold. */}
-        <div
-          role="group"
-          aria-label="Filter by status"
-          className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
-        >
-          {FILTERS.map((f) => {
-            const active = filter === f.key;
-            return (
-              <button
-                key={f.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  setFilter(f.key);
-                  setPage(1);
-                }}
-                className={`shrink-0 rounded-md border px-3 py-1.5 text-body transition-colors ${
-                  active
-                    ? 'border-honey-amber bg-honey-amber/25 font-medium text-ink'
-                    : 'border-bone bg-pure-white text-saddle hover:border-loam'
-                }`}
-              >
-                {f.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="max-w-md">
+        <TextField
+          label="Search"
+          icon={Search}
+          type="search"
+          placeholder="Claim ID or crop"
+          value={search}
+          onChange={setSearch}
+        />
       </div>
 
       {loading ? (
@@ -149,32 +105,20 @@ export default function ClaimStatus() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title={
-            query
-              ? `Nothing matches “${search.trim()}”`
-              : filter === 'all'
-                ? 'No claims yet'
-                : 'No claims with this status'
-          }
+          title={query ? `Nothing matches “${search.trim()}”` : 'No claims yet'}
           message={
             query
               ? 'Try a shorter search, or clear it.'
-              : filter === 'all'
-                ? 'File your first claim and it will appear here with its progress.'
-                : 'Switch to “All” to see every claim you have filed.'
+              : 'File your first claim and it will appear here with its progress.'
           }
           action={
             query ? (
               <button type="button" onClick={() => setSearch('')} className="btn btn-outline">
                 Clear search
               </button>
-            ) : filter === 'all' ? (
+            ) : (
               <button type="button" onClick={() => navigate('/dashboard/policies')} className="btn btn-primary">
                 <Plus className="h-4 w-4" aria-hidden="true" /> File a claim
-              </button>
-            ) : (
-              <button type="button" onClick={() => setFilter('all')} className="btn btn-outline">
-                Show all claims
               </button>
             )
           }
@@ -183,12 +127,10 @@ export default function ClaimStatus() {
         <>
           <ul className="space-y-3">
             {filtered.map((c) => {
-              const damage =
-                c.processingResult?.phases?.damageAssessment?.percentage ?? c.processingResult?.damage_percentage;
               const isRejected = c.status === 'rejected';
 
               return (
-                <li key={c._id || c.documentId} className="rounded-lg border border-bone bg-pure-white">
+                <li key={c.documentId} className="rounded-lg border border-bone bg-pure-white">
                   <button
                     type="button"
                     onClick={() => navigate(`/dashboard/claim-results/${c.documentId}`)}
@@ -197,10 +139,7 @@ export default function ClaimStatus() {
                     <span className="min-w-0">
                       <span className="block font-mono text-caption text-bark">{c.documentId}</span>
                       <span className="mt-0.5 block text-body-lg font-medium capitalize text-ink">
-                        {c.formData?.cropType || c.cropType || 'Crop claim'}
-                      </span>
-                      <span className="block text-caption text-bark">
-                        {c.insuranceId?.name || 'Insurance policy'}
+                        {c.cropType || 'Crop claim'}
                       </span>
                     </span>
                     <StatusBadge status={c.status} />
@@ -208,13 +147,10 @@ export default function ClaimStatus() {
 
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-bone px-4 py-3 sm:grid-cols-4">
                     {[
-                      { label: 'Crop', value: c.formData?.cropType || '—' },
-                      { label: 'State', value: c.formData?.state || '—' },
-                      { label: 'Area', value: c.formData?.farmArea ? `${c.formData.farmArea} acres` : '—' },
-                      {
-                        label: 'Filed',
-                        value: c.submittedAt ? fmt(c.submittedAt) : c.createdAt ? fmt(c.createdAt) : '—',
-                      },
+                      { label: 'Crop', value: c.cropType || '—' },
+                      { label: 'Cause of loss', value: c.lossReason || '—' },
+                      { label: 'Area', value: c.farmArea ? `${c.farmArea} acres` : '—' },
+                      { label: 'Filed', value: c.submittedAt ? fmt(c.submittedAt) : '—' },
                     ].map((d) => (
                       <div key={d.label}>
                         <dt className="label-micro">{d.label}</dt>
@@ -223,24 +159,21 @@ export default function ClaimStatus() {
                     ))}
                   </dl>
 
-                  {(c.confidenceScore > 0 || damage != null) && (
-                    <div className="grid gap-4 border-t border-bone px-4 py-3 sm:grid-cols-2">
-                      {c.confidenceScore > 0 && (
-                        <Meter
-                          label="AI confidence"
-                          value={c.confidenceScore * 100}
-                          caption={`${(c.confidenceScore * 100).toFixed(1)}%`}
-                        />
-                      )}
-                      {damage != null && <Meter label="Damage assessed" value={damage} caption={`${damage}%`} />}
+                  {c.confidenceScore > 0 && (
+                    <div className="border-t border-bone px-4 py-3">
+                      <Meter
+                        label="AI confidence"
+                        value={c.confidenceScore * 100}
+                        caption={`${(c.confidenceScore * 100).toFixed(1)}%`}
+                      />
                     </div>
                   )}
 
-                  {c.financial?.approvedAmount > 0 && (
+                  {c.payoutAmount > 0 && (
                     <p className="border-t border-bone px-4 py-3 text-body text-ink">
                       <span className="label-micro">Approved payout</span>
                       <span className="mt-0.5 block text-subheading font-medium text-deep-olive">
-                        ₹{c.financial.approvedAmount.toLocaleString('en-IN')}
+                        ₹{c.payoutAmount.toLocaleString('en-IN')}
                       </span>
                     </p>
                   )}
@@ -285,7 +218,7 @@ export default function ClaimStatus() {
           </ul>
 
           <div className="rounded-lg border border-bone bg-pure-white">
-            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+            <Pagination page={page} totalPages={pagination.pages} onChange={setPage} total={pagination.total} />
           </div>
         </>
       )}
@@ -302,7 +235,7 @@ export default function ClaimStatus() {
           confirmResubmit
             ? [
                 { label: 'Claim', value: confirmResubmit.documentId },
-                { label: 'Crop', value: confirmResubmit.formData?.cropType || '—' },
+                { label: 'Crop', value: confirmResubmit.cropType || '—' },
               ]
             : []
         }

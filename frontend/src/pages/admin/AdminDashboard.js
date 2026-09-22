@@ -47,7 +47,7 @@ export default function AdminDashboard() {
   if (loading) return <LoadingState label="Loading platform overview…" />;
   if (error) return <ErrorState message={error} onRetry={fetchDashboard} />;
 
-  const pendingCount = (stats.pendingClaims || 0) + (stats.manualReviewClaims || 0);
+  const pendingCount = stats.pendingClaims || 0;
   const approvalRate =
     stats.totalClaims > 0 ? (((stats.approvedClaims || 0) / stats.totalClaims) * 100).toFixed(1) : '0.0';
   const fmt = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -84,15 +84,10 @@ export default function AdminDashboard() {
         <h2 id="platform-figures" className="eyebrow">
           Platform figures
         </h2>
-        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <StatTile label="Farmers" value={(stats.totalUsers ?? 0).toLocaleString('en-IN')} hint="Registered" icon={Users} />
           <StatTile label="Claims" value={(stats.totalClaims ?? 0).toLocaleString('en-IN')} hint="Total filed" icon={ClipboardCheck} />
           <StatTile label="Pending" value={pendingCount} hint="Awaiting review" emphasis={pendingCount > 0} icon={AlertTriangle} />
-          <StatTile
-            label="Disbursed"
-            value={`₹${(stats.totalPayout || 0).toLocaleString('en-IN')}`}
-            hint="Paid to farmers"
-          />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3">
           <StatTile label="Approved" value={stats.approvedClaims ?? 0} />
@@ -151,7 +146,7 @@ export default function AdminDashboard() {
                 horizontal scroll. */}
             <ul className="divide-y divide-bone lg:hidden">
               {recentClaims.slice(0, 10).map((c) => (
-                <li key={c._id || c.documentId}>
+                <li key={c.documentId}>
                   <button
                     type="button"
                     onClick={() => navigate('/admin/claims')}
@@ -160,10 +155,10 @@ export default function AdminDashboard() {
                     <span className="min-w-0">
                       <span className="block font-mono text-caption text-bark">{c.documentId}</span>
                       <span className="mt-0.5 block text-body font-medium capitalize text-ink">
-                        {c.formData?.cropType || 'Crop claim'}
+                        {c.cropType || 'Crop claim'}
                       </span>
                       <span className="block text-caption text-bark">
-                        {c.userId?.fullName || c.userId?.phoneNumber || 'Unknown farmer'}
+                        {c.user?.fullName || c.user?.phoneNumber || 'Unknown farmer'}
                         {c.createdAt ? ` · ${fmt(c.createdAt)}` : ''}
                       </span>
                     </span>
@@ -176,7 +171,7 @@ export default function AdminDashboard() {
             <table className="hidden w-full lg:table">
               <thead>
                 <tr className="border-b border-bone text-left">
-                  {['Claim ID', 'Farmer', 'Crop', 'AI score', 'Status', 'Filed'].map((h) => (
+                  {['Claim ID', 'Farmer', 'Crop', 'Status', 'Filed'].map((h) => (
                     <th key={h} className="px-4 py-3 label-micro font-medium">
                       {h}
                     </th>
@@ -184,30 +179,23 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-bone">
-                {recentClaims.slice(0, 10).map((c) => {
-                  const confidence =
-                    c.processingResult?.overall_assessment?.confidence_score || c.confidenceScore || 0;
-                  return (
-                    <tr
-                      key={c._id || c.documentId}
-                      onClick={() => navigate('/admin/claims')}
-                      className="cursor-pointer transition-colors hover:bg-parchment"
-                    >
-                      <td className="px-4 py-3 font-mono text-caption text-saddle">{c.documentId}</td>
-                      <td className="px-4 py-3 text-body text-ink">
-                        {c.userId?.fullName || c.userId?.phoneNumber || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-body capitalize text-ink">{c.formData?.cropType || '—'}</td>
-                      <td className="px-4 py-3 text-body text-ink">
-                        {confidence > 0 ? `${(confidence * 100).toFixed(0)}%` : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={c.status} />
-                      </td>
-                      <td className="px-4 py-3 text-caption text-bark">{c.createdAt ? fmt(c.createdAt) : '—'}</td>
-                    </tr>
-                  );
-                })}
+                {recentClaims.slice(0, 10).map((c) => (
+                  <tr
+                    key={c.documentId}
+                    onClick={() => navigate('/admin/claims')}
+                    className="cursor-pointer transition-colors hover:bg-parchment"
+                  >
+                    <td className="px-4 py-3 font-mono text-caption text-saddle">{c.documentId}</td>
+                    <td className="px-4 py-3 text-body text-ink">
+                      {c.user?.fullName || c.user?.phoneNumber || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-body capitalize text-ink">{c.cropType || '—'}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={c.status} />
+                    </td>
+                    <td className="px-4 py-3 text-caption text-bark">{c.createdAt ? fmt(c.createdAt) : '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

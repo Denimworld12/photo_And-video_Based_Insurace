@@ -23,7 +23,7 @@ const STATUS_FILTERS = [
   { key: 'payout_pending', label: 'Payout pending' },
 ];
 
-const NEEDS_REVIEW = ['submitted', 'processing', 'manual_review', 'manual-review'];
+const NEEDS_REVIEW = ['submitted', 'processing', 'manual_review'];
 
 export default function ClaimVerification() {
   const toast = useToast();
@@ -66,7 +66,10 @@ export default function ClaimVerification() {
     fetchClaims();
   }, [fetchClaims]);
 
-  const suggestedPayout = (claim) => claim?.processingResult?.payout_calculation?.final_payout_amount ?? null;
+  const suggestedPayout = (claim) => {
+    const calc = claim?.processingResult?.payout_calculation;
+    return calc?.payout_amount ?? calc?.final_payout_amount ?? null;
+  };
 
   const openDetail = async (id) => {
     try {
@@ -77,7 +80,7 @@ export default function ClaimVerification() {
         // Pre-fill the amount the pipeline calculated, so approving at the
         // suggested figure is one click and any departure from it is deliberate.
         const suggested = suggestedPayout(data.claim);
-        setReviewForm({ status: '', payoutAmount: suggested != null ? String(suggested) : '', reviewNotes: '' });
+        setReviewForm({ status: '', payoutAmount: suggested > 0 ? String(suggested) : '', reviewNotes: '' });
         setReviewErrors({});
       } else {
         toast.error('That claim could not be opened.');
@@ -140,8 +143,6 @@ export default function ClaimVerification() {
 
   const fmt = (d) =>
     d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-  const confidenceOf = (c) =>
-    (c.confidenceScore || c.processingResult?.overall_assessment?.confidence_score || 0) * 100;
   const needsReview = (status) => NEEDS_REVIEW.includes(status);
 
   const handleSearch = (e) => {
@@ -255,11 +256,6 @@ export default function ClaimVerification() {
                   </div>
                   <StatusBadge status={c.status} />
                 </div>
-                <Meter
-                  label="AI confidence"
-                  value={confidenceOf(c)}
-                  caption={`${confidenceOf(c).toFixed(1)}%`}
-                />
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-caption capitalize text-bark">
                     {c.lossReason || 'Cause not given'} · {fmt(c.submittedAt || c.createdAt)}
@@ -279,7 +275,7 @@ export default function ClaimVerification() {
           <table className="hidden w-full xl:table">
             <thead>
               <tr className="border-b border-bone text-left">
-                {['Claim ID', 'Farmer', 'Crop', 'Cause', 'Confidence', 'Status', 'Filed', ''].map((h, i) => (
+                {['Claim ID', 'Farmer', 'Crop', 'Cause', 'Status', 'Filed', ''].map((h, i) => (
                   <th
                     key={h || i}
                     className="px-4 py-3 label-micro font-medium"
@@ -299,9 +295,6 @@ export default function ClaimVerification() {
                   </td>
                   <td className="px-4 py-3 text-body capitalize text-ink">{c.cropType || '—'}</td>
                   <td className="px-4 py-3 text-body capitalize text-bark">{c.lossReason || '—'}</td>
-                  <td className="w-40 px-4 py-3">
-                    <Meter label="" value={confidenceOf(c)} caption={`${confidenceOf(c).toFixed(0)}%`} />
-                  </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={c.status} />
                   </td>
@@ -407,8 +400,8 @@ function ClaimDetail({
   const confidence =
     (claim.confidenceScore || claim.processingResult?.overall_assessment?.confidence_score || 0) * 100;
   const damage =
-    claim.processingResult?.damage_assessment?.final_damage_percent ??
-    claim.processingResult?.overall_assessment?.damage_percentage;
+    claim.processingResult?.damage_percentage ??
+    claim.processingResult?.damage_assessment?.final_damage_percent;
   const aiDecision =
     claim.processingResult?.decision?.decision || claim.processingResult?.overall_assessment?.final_decision;
   const evidence = claim.uploadedImages || [];

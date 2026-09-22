@@ -198,8 +198,13 @@ export default function MediaCapture() {
         setUploadProgress((prev) => ({ ...prev, [stepId]: 'uploading' }));
         const fd = new FormData();
         fd.append('image', cd.blob, `${stepId}.jpg`);
-        fd.append('lat', (cd.coords?.lat ?? 0).toString());
-        fd.append('lon', (cd.coords?.lon ?? 0).toString());
+        // Without a fix, the coordinates are left out rather than sent as
+        // 0/0 — an upload the backend refuses is better than a photo filed
+        // under a GPS tag the farmer never gave.
+        if (cd.coords?.lat != null && cd.coords?.lon != null) {
+          fd.append('lat', cd.coords.lat.toString());
+          fd.append('lon', cd.coords.lon.toString());
+        }
         fd.append('client_ts', (cd.timestamp?.getTime() || Date.now()).toString());
         fd.append('parcel_id', documentId);
         fd.append('media_type', 'photo');

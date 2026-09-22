@@ -16,7 +16,7 @@ export default function UserManagement() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, pages: 1 });
   const [toggling, setToggling] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
 
@@ -29,7 +29,7 @@ export default function UserManagement() {
       });
       if (!data.success) throw new Error(data.error || 'The user list could not be read.');
       setUsers(data.users || []);
-      setTotalPages(data.totalPages || 1);
+      setPagination(data.pagination || { total: 0, pages: 1 });
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'The user list could not be loaded.');
       setUsers([]);
@@ -221,7 +221,7 @@ export default function UserManagement() {
             </tbody>
           </table>
 
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          <Pagination page={page} totalPages={pagination.pages} onChange={setPage} total={pagination.total} />
         </div>
       )}
 

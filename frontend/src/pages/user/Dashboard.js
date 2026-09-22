@@ -8,8 +8,8 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import { LoadingState, ErrorState, EmptyState } from '../../components/ui/States';
 import { FileText, ClipboardList, Plus, ArrowRight, Sprout } from 'lucide-react';
 
-const PENDING = ['submitted', 'processing', 'manual_review', 'manual-review', 'draft'];
-const SETTLED = ['approved', 'payout_pending', 'payout-pending', 'payout_complete', 'payout-complete'];
+const PENDING = ['submitted', 'processing', 'manual_review', 'draft'];
+const SETTLED = ['approved', 'payout_pending', 'payout_complete'];
 
 export default function Dashboard() {
   const { user } = useAuth();

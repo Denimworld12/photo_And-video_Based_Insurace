@@ -380,7 +380,7 @@ reads require an `Authorization: Bearer <token>` header. `/api/admin/*` addition
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/list` | The caller's claims. Query: `filter`, `page`, `limit` |
+| `GET` | `/list` | The caller's claims. Query: `page`, `limit` |
 | `POST` | `/initialize` | Open a claim from a policy and a form payload; returns a `documentId` |
 | `POST` | `/upload` | Upload one evidence photo (multipart: `image`, `lat`, `lon`, `client_ts`, `parcel_id`, `media_type`, `step_id`) |
 | `POST` | `/complete` | Close evidence collection and run the assessment pipeline |
@@ -396,7 +396,7 @@ reads require an `Authorization: Bearer <token>` header. `/api/admin/*` addition
 | `GET` | `/:id` | One policy |
 | `POST` | `/` | Create a policy |
 | `PUT` | `/:id` | Update a policy |
-| `DELETE` | `/:id` | Delete a policy |
+| `DELETE` | `/:id` | Withdraw a policy. Soft delete — sets `isActive: false`, so it disappears from `/list` but the record is kept |
 
 ### User — `/api/user`
 

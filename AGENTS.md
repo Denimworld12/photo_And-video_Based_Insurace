@@ -27,9 +27,9 @@ Rules that the whole of `src/` already follows, and that changes must keep:
 - No blue, red or other saturated primaries. Because the status colour range is deliberately
   narrow, **no state may be signalled by colour alone** — pair it with an icon and a word.
 - Shared UI lives in `src/components/ui/` (Field, Modal, ConfirmDialog, Toast, States, PageHeader,
-  StatTile, StatusBadge, Pagination). Reach for these before writing a new one; `StatusBadge` in
-  particular is the single claim-status vocabulary and normalises the backend's inconsistent
-  `manual_review` / `manual-review` and `payout_pending` / `payout-pending` spellings.
+  StatTile, StatusBadge, Pagination). Reach for these before writing a new one; `StatusBadge` is the
+  single claim-status vocabulary, keyed exactly on the underscore status enum in
+  `backend/src/models/Claim.js` — the only spelling the backend writes.
 
 Gotcha: the design system's layout spacing steps are named (`spacing-hair`, `-tight`, `-section`,
 `-gutter`, `-bay`, `-chapter`), not numbered. Binding `4px` to the numeric key `4` would redefine

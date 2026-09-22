@@ -27,7 +27,7 @@ export default function Notifications() {
       setError(null);
       const { data } = await api.get('/api/notifications');
       setNotifications(data.notifications || []);
-      setUnreadCount(data.unreadCount || 0);
+      setUnreadCount(data.unread || 0);
     } catch (err) {
       // A failed fetch used to fall through to "No notifications yet", telling
       // the farmer their claim had no updates when the server was simply down.

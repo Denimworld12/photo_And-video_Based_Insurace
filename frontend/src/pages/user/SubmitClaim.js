@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useClaim } from '../../contexts/ClaimContext';
 import api from '../../utils/api';
 import { INDIAN_STATES, SEASONS, CROP_TYPES, LOSS_REASONS } from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
@@ -20,7 +19,6 @@ const MIN_DESCRIPTION = 10;
 export default function SubmitClaim() {
   const { insuranceId } = useParams();
   const navigate = useNavigate();
-  const { generateDocumentId } = useClaim();
   const [step, setStep] = useState(1);
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +100,6 @@ export default function SubmitClaim() {
     try {
       setSubmitting(true);
       setError('');
-      const fallbackId = generateDocumentId();
       const payload = {
         insuranceId,
         formData: {
@@ -120,7 +117,7 @@ export default function SubmitClaim() {
       const { data } = await api.post('/api/claims/initialize', payload);
       if (data.success) {
         setConfirmOpen(false);
-        navigate(`/dashboard/media-capture/${data.claim?.documentId || fallbackId}`);
+        navigate(`/dashboard/media-capture/${data.claim.documentId}`);
       } else {
         setError(data.details ? data.details.join(', ') : data.error || 'We could not start your claim. Try again.');
         setConfirmOpen(false);

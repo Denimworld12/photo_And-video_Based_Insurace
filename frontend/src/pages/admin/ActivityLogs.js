@@ -4,17 +4,20 @@ import PageHeader from '../../components/ui/PageHeader';
 import Pagination from '../../components/ui/Pagination';
 import { ErrorState, EmptyState, SkeletonList } from '../../components/ui/States';
 import {
-  Activity, CheckCircle2, XCircle, FileText, Edit3, Trash2, UserCog, LogIn,
+  Activity, CheckCircle2, XCircle, Eye, FileText, Edit3, UserCheck, UserX, Banknote, Settings,
 } from 'lucide-react';
 
+/** Keyed on the AdminAction enum in backend/src/models/AdminAction.js. */
 const ACTION = {
   approve_claim: { label: 'Approved a claim', Icon: CheckCircle2 },
   reject_claim: { label: 'Rejected a claim', Icon: XCircle },
+  request_review: { label: 'Sent a claim for manual review', Icon: Eye },
   create_policy: { label: 'Created a policy', Icon: FileText },
   update_policy: { label: 'Updated a policy', Icon: Edit3 },
-  delete_policy: { label: 'Deleted a policy', Icon: Trash2 },
-  toggle_user: { label: 'Changed an account status', Icon: UserCog },
-  login: { label: 'Signed in', Icon: LogIn },
+  activate_user: { label: 'Activated an account', Icon: UserCheck },
+  deactivate_user: { label: 'Deactivated an account', Icon: UserX },
+  process_payout: { label: 'Processed a payout', Icon: Banknote },
+  system_config: { label: 'Changed a system setting', Icon: Settings },
 };
 
 /** Renders a details payload as readable rows instead of a wall of JSON. */
@@ -47,7 +50,7 @@ export default function ActivityLogs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, pages: 1 });
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -56,7 +59,7 @@ export default function ActivityLogs() {
       const { data } = await api.get('/api/admin/activity-logs', { params: { page, limit: 20 } });
       if (!data.success) throw new Error(data.error || 'The activity log could not be read.');
       setLogs(data.logs || []);
-      setTotalPages(data.totalPages || 1);
+      setPagination(data.pagination || { total: 0, pages: 1 });
     } catch (err) {
       // An audit trail that silently renders as empty on failure is worse than
       // no audit trail — it reads as "nothing happened".
@@ -128,7 +131,7 @@ export default function ActivityLogs() {
               );
             })}
           </ol>
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          <Pagination page={page} totalPages={pagination.pages} onChange={setPage} total={pagination.total} />
         </div>
       )}
     </div>
