@@ -17,12 +17,12 @@ if (API_KEY && API_KEY !== 'your_gemini_api_key_here') {
   try {
     genAI = new GoogleGenerativeAI(API_KEY);
     model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    console.log('✅ Gemini AI service initialized');
+    console.log('[GEMINI] Service initialized');
   } catch (err) {
-    console.warn('⚠️ Gemini AI initialization failed:', err.message);
+    console.warn('[GEMINI] Initialization failed:', err.message);
   }
 } else {
-  console.log('ℹ️ Gemini AI not configured (set GEMINI_API_KEY in .env)');
+  console.log('[GEMINI] Not configured (set GEMINI_API_KEY in .env), summaries will use the built-in fallback');
 }
 
 /**
@@ -75,7 +75,7 @@ const summarizeClaimResult = async (processingResult, claimInfo = {}) => {
       generatedAt: new Date().toISOString(),
     };
   } catch (err) {
-    console.error('❌ Gemini summarization error:', err.message);
+    console.error('[GEMINI] Summarization failed, using fallback summary:', err.message);
     return fallbackSummary(processingResult, claimInfo);
   }
 };
@@ -127,12 +127,32 @@ Respond with ONLY the JSON object.`,
 
     return { description: text.trim(), damageEstimate: null, confidence: 0.5, analyzedBy: 'gemini-1.5-flash' };
   } catch (err) {
-    console.error('❌ Gemini image analysis error:', err.message);
+    console.error('[GEMINI] Image analysis failed:', err.message);
     return { description: 'Image analysis failed', damageEstimate: null, confidence: 0, error: err.message };
   }
 };
 
 /* ─── Internal helpers ─── */
+
+/** Format a rupee amount, tolerating a missing or non-numeric value. */
+function rupees(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString('en-IN') : 'not calculated';
+}
+
+/** Show a percentage, or say so plainly when none was measured. */
+function percent(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n}%` : 'not measured';
+}
+
+/**
+ * The pipeline reports the payout as `payout_amount`; `final_payout_amount` is
+ * accepted so an older result stored on a claim still renders.
+ */
+function payoutAmount(payout) {
+  return payout.payout_amount ?? payout.final_payout_amount;
+}
 
 function buildPrompt(pr, info) {
   const damage = pr.damage_assessment || {};
@@ -153,9 +173,9 @@ CLAIM INFORMATION:
 - State: ${info.state || 'Not specified'}
 
 DAMAGE ASSESSMENT:
-- AI Calculated Damage: ${damage.ai_calculated_damage_percent || damage.final_damage_percent || 'N/A'}%
-- Farmer Claimed Damage: ${damage.farmer_claimed_damage_percent || 'N/A'}%
-- Final Damage Percentage: ${damage.final_damage_percent || 'N/A'}%
+- AI Calculated Damage: ${percent(damage.ai_calculated_damage_percent ?? damage.final_damage_percent)}
+- Farmer Claimed Damage: ${percent(damage.farmer_claimed_damage_percent)}
+- Final Damage Percentage: ${percent(damage.final_damage_percent)}
 - Severity: ${damage.severity || 'Unknown'}
 
 VERIFICATION RESULTS:
@@ -165,12 +185,13 @@ VERIFICATION RESULTS:
 
 DECISION:
 - Status: ${decision.status || overall.final_decision || 'Pending'}
-- Confidence Score: ${overall.confidence_score || 'N/A'}
+- Confidence Score: ${overall.confidence_score ?? 'not produced'}
 - Reason: ${decision.reason || overall.decision_reason || 'N/A'}
+${pr.pipeline_failed ? '- NOTE: automated analysis did not complete; no damage measurement is available and this claim needs a human reviewer.' : ''}
 
 PAYOUT:
-- Sum Insured: ₹${(payout.sum_insured || 0).toLocaleString('en-IN')}
-- Calculated Payout: ₹${(payout.final_payout_amount || 0).toLocaleString('en-IN')}
+- Sum Insured: INR ${rupees(payout.sum_insured)}
+- Calculated Payout: INR ${rupees(payoutAmount(payout))}
 
 Respond with a JSON object:
 {
@@ -188,30 +209,54 @@ function fallbackSummary(pr, info) {
   const decision = pr.decision || {};
   const overall = pr.overall_assessment || {};
   const payout = pr.payout_calculation || {};
-  const confidence = overall.confidence_score || 0;
-  const damagePercent = damage.final_damage_percent || damage.ai_calculated_damage_percent || 0;
+  const confidence = Number(overall.confidence_score);
+  const damagePercent = Number(damage.final_damage_percent ?? damage.ai_calculated_damage_percent);
   const status = decision.status || overall.final_decision || 'pending';
+  const hasDamageMeasurement = Number.isFinite(damagePercent);
+
+  // A claim whose analysis never completed must not be summarised as "0% damage
+  // detected" - that reads as a measurement, when in fact nothing was measured.
+  if (pr.pipeline_failed || !hasDamageMeasurement) {
+    const reason = pr.pipeline_failure_reason || 'the automated assessment did not complete';
+    return {
+      summary:
+        `Claim ${info.documentId || ''} for ${info.cropType || 'crop'} damage could not be assessed automatically ` +
+        `(${reason}). No damage measurement or payout figure is available; a reviewer must assess this claim.`,
+      keyFindings: [
+        'Automated damage assessment did not complete',
+        `Reason: ${reason}`,
+        `Status: ${status}`,
+      ],
+      riskFactors: ['No automated verification evidence is available for this claim'],
+      recommendations: ['Manual field inspection required'],
+      payoutJustification: 'No payout calculated: the automated assessment did not complete.',
+      generatedBy: 'fallback',
+      generatedAt: new Date().toISOString(),
+    };
+  }
 
   let summary = `Claim ${info.documentId || ''} for ${info.cropType || 'crop'} damage has been assessed with ${Math.round(damagePercent)}% damage detected. `;
   if (status === 'approved') {
-    summary += `The claim has been approved with a payout of ₹${(payout.final_payout_amount || 0).toLocaleString('en-IN')}.`;
+    summary += `The claim has been approved with a payout of INR ${rupees(payoutAmount(payout))}.`;
   } else if (status === 'rejected') {
     summary += `The claim has been rejected. ${decision.reason || ''}`;
   } else {
-    summary += `The claim requires manual review (confidence: ${(confidence * 100).toFixed(0)}%).`;
+    summary += Number.isFinite(confidence)
+      ? `The claim requires manual review (confidence: ${(confidence * 100).toFixed(0)}%).`
+      : 'The claim requires manual review.';
   }
 
   return {
     summary,
     keyFindings: [
-      `Damage level: ${damagePercent}% (${damage.severity || 'moderate'})`,
-      `Confidence score: ${(confidence * 100).toFixed(0)}%`,
+      `Damage level: ${damagePercent}% (${damage.severity || 'unknown severity'})`,
+      Number.isFinite(confidence) ? `Confidence score: ${(confidence * 100).toFixed(0)}%` : 'Confidence score: not produced',
       `Status: ${status}`,
     ],
-    riskFactors: confidence < 0.5 ? ['Low confidence score may indicate uncertain assessment'] : [],
+    riskFactors: Number.isFinite(confidence) && confidence < 0.5 ? ['Low confidence score may indicate uncertain assessment'] : [],
     recommendations: status === 'manual_review' ? ['Manual field inspection recommended'] : [],
-    payoutJustification: payout.final_payout_amount
-      ? `Based on ${damagePercent}% verified damage on ₹${(payout.sum_insured || 0).toLocaleString('en-IN')} sum insured`
+    payoutJustification: Number.isFinite(Number(payoutAmount(payout))) && Number(payoutAmount(payout)) > 0
+      ? `Based on ${damagePercent}% verified damage on INR ${rupees(payout.sum_insured)} sum insured`
       : 'No payout calculated',
     generatedBy: 'fallback',
     generatedAt: new Date().toISOString(),

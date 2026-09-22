@@ -1,8 +1,16 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 
+const isDbConnected = () => mongoose.connection.readyState === 1;
+
 /**
- * Verify JWT token and attach user to req.user
+ * Verify JWT token and attach user to req.user.
+ *
+ * The user record is the source of truth for role and active status. The token
+ * payload is only used as a fallback while the database is unreachable, and
+ * even then it can never confer the admin role: a signed token outlives a
+ * revocation, so privileged access always requires a live record.
  */
 const authenticate = async (req, res, next) => {
   try {
@@ -14,29 +22,40 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Try DB look-up first; fall back to decoded payload if DB is down
-    let user;
-    try {
-      user = await User.findById(decoded.id).select('-__v');
-    } catch {
-      user = null;
-    }
+    if (isDbConnected()) {
+      let user;
+      try {
+        user = await User.findById(decoded.id).select('-__v');
+      } catch (dbErr) {
+        console.error('[AUTH] User lookup failed:', dbErr.message);
+        return res.status(503).json({ success: false, error: 'Service temporarily unavailable' });
+      }
 
-    if (user) {
+      if (!user) {
+        return res.status(401).json({ success: false, error: 'Invalid token' });
+      }
       if (!user.isActive) {
         return res.status(403).json({ success: false, error: 'Account deactivated' });
       }
+
       req.user = user;
-    } else {
-      // Graceful fallback when running without DB
-      req.user = {
-        _id: decoded.id,
-        phoneNumber: decoded.phoneNumber,
-        role: decoded.role || 'farmer',
-        fullName: decoded.fullName || '',
-      };
+      return next();
     }
 
+    // Database unreachable: degrade to the token payload, without admin rights.
+    if (decoded.role === 'admin') {
+      return res.status(503).json({
+        success: false,
+        error: 'Administrative access is unavailable while the database is unreachable',
+      });
+    }
+
+    req.user = {
+      _id: decoded.id,
+      phoneNumber: decoded.phoneNumber,
+      role: 'farmer',
+      fullName: decoded.fullName || '',
+    };
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
@@ -47,18 +66,20 @@ const authenticate = async (req, res, next) => {
 };
 
 /**
- * Optional auth – sets req.user if token present, but doesn't block
+ * Optional auth – sets req.user if a valid token is present, but doesn't block.
  */
-const optionalAuth = async (req, res, next) => {
+const optionalAuth = async (req, _res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      try {
-        req.user = await User.findById(decoded.id).select('-__v');
-      } catch {
-        req.user = { _id: decoded.id, phoneNumber: decoded.phoneNumber, role: decoded.role };
+
+      if (isDbConnected()) {
+        const user = await User.findById(decoded.id).select('-__v');
+        if (user && user.isActive) req.user = user;
+      } else if (decoded.role !== 'admin') {
+        req.user = { _id: decoded.id, phoneNumber: decoded.phoneNumber, role: 'farmer' };
       }
     }
   } catch {

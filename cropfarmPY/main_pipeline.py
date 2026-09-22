@@ -5,12 +5,19 @@ MAIN PIPELINE - Crop Damage Insurance Assessment
 Single entry point for backend integration.
 Uses config.pkl for model configuration.
 
-Output Format:
+Output contract (stdout, JSON):
 {
-    "damage_assessment": { ... },
-    "verification_results": { ... },
-    "final_decision": { ... }
+    "damage_assessment":    { ai_calculated_damage_percent, farmer_claimed_damage_percent,
+                              final_damage_percent, severity },
+    "verification_results": { geolocation, weather, fraud_risk, exif, tampering },
+    "overall_assessment":   { final_decision, confidence_score, risk_level,
+                              manual_review_required, decision_reason },
+    "payout_calculation":   { sum_insured, damage_percent, payout_amount, currency }
 }
+
+Failures are reported as {"error": "..."} on stderr with a non-zero exit code.
+Nothing but the result JSON is ever written to stdout, because the Node caller
+parses stdout in full.
 """
 
 import sys
@@ -168,9 +175,24 @@ def get_exif_timestamp(image_path: str) -> Optional[str]:
         exif = img._getexif()
         if exif:
             return exif.get(36867) # DateTimeOriginal
-    except:
+    except Exception:
         pass
     return None
+
+def get_exif_software(image_path: str) -> str:
+    """
+    Extract the EXIF Software tag, which names the tool that last wrote the
+    file. FraudDetector uses it to spot images that went through an editor.
+    """
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        exif = img._getexif()
+        if exif:
+            return str(exif.get(305) or '')  # Software
+    except Exception:
+        pass
+    return ''
 
 
 # ============================================================================
@@ -180,12 +202,12 @@ def assess_crop_damage(
     image_paths: List[str],
     user_coords: Optional[Dict] = None,
     field_size_m2: Optional[float] = None,
-    farmer_claimed_damage: float = 50.0,
+    farmer_claimed_damage: Optional[float] = None,
     sum_insured: float = 100000.0,
     api_key: Optional[str] = None
 ) -> Dict:
     """
-    🔥 MAIN FUNCTION - Assess crop damage with Multi-Stage Verification.
+    Main entry point: assess crop damage with multi-stage verification.
     """
     if not image_paths:
         return {'error': 'No images provided'}
@@ -202,13 +224,18 @@ def assess_crop_damage(
     damage_types = []
     image_details_for_fraud = []
     
+    skipped_images = []
+
     for path in image_paths:
         if not os.path.exists(path):
+            skipped_images.append({'filename': os.path.basename(path), 'reason': 'file not found'})
             continue
         
         # Analyze damage
         analysis = analyze_damage_rgb(path)
-        if 'error' not in analysis:
+        if 'error' in analysis:
+            skipped_images.append({'filename': os.path.basename(path), 'reason': analysis['error']})
+        else:
             results.append(analysis)
             damage_percentages.append(analysis['damage_percentage'])
             damage_types.append(analysis['damage_type_code'])
@@ -222,11 +249,12 @@ def assess_crop_damage(
         image_details_for_fraud.append({
             'filename': os.path.basename(path),
             'exif_timestamp': ts,
-            'software': '' # Can extract software tag if needed
+            'software': get_exif_software(path)
         })
     
     if not results:
-        return {'error': 'No valid images could be processed'}
+        detail = '; '.join(f"{s['filename']}: {s['reason']}" for s in skipped_images) or 'no images supplied'
+        return {'error': f'No valid images could be processed ({detail})'}
 
     # 2. Geolocation Verification
     geo_result = geo_verifier.analyze_coordinate_cluster(coordinates)
@@ -249,15 +277,15 @@ def assess_crop_damage(
         weather_result = weather_verifier.verify_damage_correlation(weather_data, damage_type_code)
 
     # 5. Fraud Detection
-    # TODO: Pass Exif software data
     exif_fraud_result = fraud_detector.verify_exif_timestamps(image_details_for_fraud, datetime.now())
+    tampering_result = fraud_detector.detect_metadata_tampering(image_details_for_fraud)
     
     # 6. Final Fraud Risk Calculation
     fraud_risk = fraud_detector.calculate_fraud_risk(
         weather_score=weather_result.get('confidence_score', 0.5),
         geolocation_score=geo_result.get('score', 0.5),
         exif_score=exif_fraud_result.get('score', 0.5),
-        tampering_score=1.0 # Placeholder
+        tampering_score=tampering_result.get('score', 1.0)
     )
 
     # 7. Area Calculation
@@ -297,7 +325,35 @@ def assess_crop_damage(
         claim_decision = 'REJECT'
         decision_reason = f"Low Verification Score ({verified_confidence:.2f}) - Rejected"
 
-    payout = (avg_damage / 100) * sum_insured if claim_decision == 'APPROVE' else 0
+    # The entitlement is always calculated from the measured damage, and is
+    # reported regardless of this pipeline's own recommendation. Zeroing it here
+    # whenever this pipeline stopped short of APPROVE meant a claim that the
+    # backend approved under its own (lower) threshold was paid nothing.
+    # This pipeline measures; whoever consumes the result decides whether to pay.
+    payout = (avg_damage / 100) * sum_insured
+
+    # Severity band for the detected damage, so consumers do not have to
+    # re-derive one from the raw percentage.
+    if avg_damage >= 70:
+        severity = 'severe'
+    elif avg_damage >= 40:
+        severity = 'moderate'
+    elif avg_damage >= 15:
+        severity = 'minor'
+    else:
+        severity = 'negligible'
+
+    # The farmer's own damage estimate is reported alongside the measured one so
+    # a reviewer can see any over-claim. It deliberately does not feed the
+    # decision score: how to weigh a disputed self-estimate is a policy call,
+    # not something this pipeline should decide silently. When no estimate was
+    # supplied both fields are null rather than a stand-in number.
+    if farmer_claimed_damage is None:
+        claimed_percent = None
+        claim_discrepancy = None
+    else:
+        claimed_percent = round(float(farmer_claimed_damage), 1)
+        claim_discrepancy = round(float(farmer_claimed_damage) - float(avg_damage), 1)
 
     return {
         # CORE OUTPUT
@@ -305,13 +361,24 @@ def assess_crop_damage(
         'damage_type_code': damage_type_code,
         'damage_percentage': round(avg_damage, 1),
         'damaged_area_m2': round(damaged_area_m2, 1),
+
+        # DAMAGE ASSESSMENT (shape consumed by the Node backend and the AI summary)
+        'damage_assessment': {
+            'ai_calculated_damage_percent': round(avg_damage, 1),
+            'farmer_claimed_damage_percent': claimed_percent,
+            'final_damage_percent': round(avg_damage, 1),
+            'claim_discrepancy_percent': claim_discrepancy,
+            'damage_type': damage_type_name,
+            'severity': severity
+        },
         
         # VERIFICATION RESULTS
         'verification_results': {
             'geolocation': geo_result,
             'weather': weather_result,
             'fraud_risk': fraud_risk,
-            'exif': exif_fraud_result
+            'exif': exif_fraud_result,
+            'tampering': tampering_result
         },
         
         # DECISION
@@ -328,6 +395,7 @@ def assess_crop_damage(
             'sum_insured': sum_insured,
             'damage_percent': round(avg_damage, 1),
             'payout_amount': round(payout, 2),
+            'payout_recommended': claim_decision == 'APPROVE',
             'currency': 'INR'
         },
         
@@ -337,6 +405,7 @@ def assess_crop_damage(
             'estimation_method': area_method
         },
         'images_processed': len(results),
+        'images_skipped': skipped_images,
         'timestamp': datetime.now().isoformat()
     }
 
@@ -344,48 +413,71 @@ def assess_crop_damage(
 # ============================================================================
 # CLI INTERFACE
 # ============================================================================
+def fail(message: str, exit_code: int = 1):
+    """
+    Report a failure on stderr with a non-zero exit code.
+
+    The caller distinguishes success from failure by exit code, so an error must
+    never be printed to stdout as if it were a result: a result-shaped error on
+    stdout reads as a zero-confidence assessment and would auto-reject a claim.
+    """
+    print(json.dumps({'error': message}), file=sys.stderr)
+    sys.exit(exit_code)
+
+
 def main():
     if len(sys.argv) < 2:
-        # Print usage to stderr so it doesn't parse as invalid JSON
-        print(json.dumps({'error': 'Usage: python main_pipeline.py <images> [options]'}), file=sys.stderr)
-        sys.exit(1)
-    
+        fail('Usage: python main_pipeline.py <images> [--field-size N] [--sum-insured N] '
+             '[--claimed-damage N] [--user-lat N] [--user-lon N] [--api-key KEY]')
+
     try:
         # Parse arguments
         image_paths = []
         field_size = None
         sum_insured = 100000.0
-        claimed_damage = 50.0
+        claimed_damage = None
         user_lat = None
         user_lon = None
         api_key = None
-        
+
+        flags_with_value = {
+            '--field-size', '--sum-insured', '--claimed-damage',
+            '--user-lat', '--user-lon', '--api-key',
+        }
+
         i = 1
         while i < len(sys.argv):
             arg = sys.argv[i]
-            
-            if arg == '--field-size' and i + 1 < len(sys.argv):
-                field_size = float(sys.argv[i + 1])
+
+            if arg in flags_with_value:
+                if i + 1 >= len(sys.argv):
+                    fail(f'Option {arg} requires a value')
+                value = sys.argv[i + 1]
+                try:
+                    if arg == '--field-size':
+                        field_size = float(value)
+                    elif arg == '--sum-insured':
+                        sum_insured = float(value)
+                    elif arg == '--claimed-damage':
+                        claimed_damage = float(value)
+                    elif arg == '--user-lat':
+                        user_lat = float(value)
+                    elif arg == '--user-lon':
+                        user_lon = float(value)
+                    else:
+                        api_key = value
+                except ValueError:
+                    fail(f'Option {arg} expects a number, got {value!r}')
                 i += 2
-            elif arg == '--sum-insured' and i + 1 < len(sys.argv):
-                sum_insured = float(sys.argv[i + 1])
-                i += 2
-            elif arg == '--claimed-damage' and i + 1 < len(sys.argv):
-                claimed_damage = float(sys.argv[i + 1])
-                i += 2
-            elif arg == '--user-lat' and i + 1 < len(sys.argv):
-                user_lat = float(sys.argv[i + 1])
-                i += 2
-            elif arg == '--user-lon' and i + 1 < len(sys.argv):
-                user_lon = float(sys.argv[i + 1])
-                i += 2
-            elif arg == '--api-key' and i + 1 < len(sys.argv):
-                api_key = sys.argv[i + 1]
-                i += 2
+            elif arg.startswith('--'):
+                fail(f'Unknown option: {arg}')
             else:
                 image_paths.append(arg)
                 i += 1
-        
+
+        if not image_paths:
+            fail('No image paths supplied')
+
         user_coords = {'lat': user_lat, 'lon': user_lon} if user_lat is not None and user_lon is not None else None
 
         result = assess_crop_damage(
@@ -396,13 +488,19 @@ def main():
             sum_insured=sum_insured,
             api_key=api_key
         )
-        
+
+        # assess_crop_damage signals its own failures in-band; surface them as
+        # process failures rather than printing them as a result.
+        if isinstance(result, dict) and 'error' in result:
+            fail(result['error'])
+
         print(json.dumps(result, indent=2))
         sys.stdout.flush()
 
+    except SystemExit:
+        raise
     except Exception as e:
-        print(json.dumps({'error': str(e)}), file=sys.stderr)
-        sys.exit(1)
+        fail(f'{type(e).__name__}: {e}')
 
 
 if __name__ == '__main__':

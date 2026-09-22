@@ -1,3 +1,4 @@
+const path = require('path');
 const User = require('../models/User');
 const Claim = require('../models/Claim');
 const AdminAction = require('../models/AdminAction');
@@ -6,14 +7,24 @@ const Notification = require('../models/Notification');
 // Escape regex special characters to prevent ReDoS
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Statuses whose payout has already left the system; re-reviewing one would
+// change the record of a payment that was already made.
+const SETTLED_STATUSES = ['payout_complete'];
+
+const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
+  return { page, limit, skip: (page - 1) * limit };
+};
+
 /* ─── Dashboard Stats ─── */
 exports.dashboardStats = async (req, res) => {
   try {
     const [totalUsers, totalClaims, statusCounts, recentClaims] = await Promise.all([
-      User.countDocuments({ role: 'farmer' }).catch(() => 0),
-      Claim.countDocuments().catch(() => 0),
-      Claim.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]).catch(() => []),
-      Claim.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'phoneNumber fullName').catch(() => []),
+      User.countDocuments({ role: 'farmer' }),
+      Claim.countDocuments(),
+      Claim.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Claim.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'phoneNumber fullName'),
     ]);
 
     const statusMap = {};
@@ -26,7 +37,11 @@ exports.dashboardStats = async (req, res) => {
         totalClaims,
         approvedClaims: statusMap.approved || 0,
         rejectedClaims: statusMap.rejected || 0,
-        pendingClaims: (statusMap.manual_review || 0) + (statusMap.submitted || 0) + (statusMap.draft || 0),
+        pendingClaims:
+          (statusMap.manual_review || 0) +
+          (statusMap.submitted || 0) +
+          (statusMap.draft || 0) +
+          (statusMap.processing || 0),
         payoutPending: statusMap.payout_pending || 0,
       },
       recentClaims: recentClaims.map((c) => ({
@@ -39,7 +54,7 @@ exports.dashboardStats = async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error('❌ dashboardStats:', err);
+    console.error('[ADMIN:DASHBOARD] Failed to load dashboard:', err.message);
     res.status(500).json({ success: false, error: 'Failed to load dashboard' });
   }
 };
@@ -47,14 +62,12 @@ exports.dashboardStats = async (req, res) => {
 /* ─── List Users ─── */
 exports.listUsers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const { page, limit, skip } = readPaging(req);
     const search = req.query.search || '';
-    const skip = (page - 1) * limit;
 
     const filter = { role: 'farmer' };
     if (search) {
-      const safe = escapeRegex(search);
+      const safe = escapeRegex(String(search).slice(0, 100));
       filter.$or = [
         { phoneNumber: { $regex: safe, $options: 'i' } },
         { fullName: { $regex: safe, $options: 'i' } },
@@ -68,7 +81,7 @@ exports.listUsers = async (req, res) => {
 
     res.json({ success: true, users, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
-    console.error('❌ listUsers:', err);
+    console.error('[ADMIN:USERS] Failed to fetch users:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch users' });
   }
 };
@@ -78,6 +91,11 @@ exports.toggleUserActive = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+    // An admin locking themselves out would leave the portal unadministrable.
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, error: 'You cannot deactivate your own account' });
+    }
 
     user.isActive = !user.isActive;
     await user.save();
@@ -92,7 +110,7 @@ exports.toggleUserActive = async (req, res) => {
 
     res.json({ success: true, user });
   } catch (err) {
-    console.error('❌ toggleUserActive:', err);
+    console.error('[ADMIN:TOGGLE-USER] Failed to update user:', err.message);
     res.status(500).json({ success: false, error: 'Failed to update user' });
   }
 };
@@ -100,16 +118,20 @@ exports.toggleUserActive = async (req, res) => {
 /* ─── All Claims (Admin) ─── */
 exports.allClaims = async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const { page, limit, skip } = readPaging(req);
     const status = req.query.status;
     const search = req.query.search;
-    const skip = (page - 1) * limit;
 
     const filter = {};
-    if (status) filter.status = status;
+    if (status) {
+      const allowed = Claim.schema.path('status').enumValues;
+      if (!allowed.includes(status)) {
+        return res.status(400).json({ success: false, error: 'Invalid status filter' });
+      }
+      filter.status = status;
+    }
     if (search) {
-      const safe = escapeRegex(search);
+      const safe = escapeRegex(String(search).slice(0, 100));
       filter.$or = [
         { documentId: { $regex: safe, $options: 'i' } },
         { cropType: { $regex: safe, $options: 'i' } },
@@ -141,7 +163,7 @@ exports.allClaims = async (req, res) => {
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (err) {
-    console.error('❌ allClaims:', err);
+    console.error('[ADMIN:CLAIMS] Failed to fetch claims:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch claims' });
   }
 };
@@ -158,13 +180,13 @@ exports.getClaimDetail = async (req, res) => {
     if (claimObj.uploadedImages) {
       claimObj.uploadedImages = claimObj.uploadedImages.map((img) => ({
         ...img,
-        cloudinaryUrl: img.cloudinaryUrl || (img.localPath ? `${baseUrl}/uploads/${require('path').basename(img.localPath)}` : ''),
+        cloudinaryUrl: img.cloudinaryUrl || (img.localPath ? `${baseUrl}/uploads/${path.basename(img.localPath)}` : ''),
       }));
     }
 
     res.json({ success: true, claim: claimObj });
   } catch (err) {
-    console.error('❌ getClaimDetail:', err);
+    console.error('[ADMIN:CLAIM-DETAIL] Failed to fetch claim:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch claim' });
   }
 };
@@ -176,17 +198,36 @@ exports.reviewClaim = async (req, res) => {
     const claim = await Claim.findById(req.params.id);
     if (!claim) return res.status(404).json({ success: false, error: 'Claim not found' });
 
+    const previousStatus = claim.status;
+
+    if (SETTLED_STATUSES.includes(claim.status)) {
+      return res.status(409).json({
+        success: false,
+        error: `Claim is ${claim.status} and can no longer be reviewed`,
+      });
+    }
+
     claim.status = status;
     claim.reviewedBy = req.user._id;
-    claim.reviewNotes = reviewNotes;
+    // Only overwrite the notes when new ones were supplied, so a review that
+    // omits them does not erase the previous reviewer's comments.
+    if (reviewNotes !== undefined) claim.reviewNotes = reviewNotes;
     claim.reviewedAt = new Date();
-    if (status === 'rejected') {
-      claim.rejectionReason = reviewNotes || 'Claim rejected by admin';
+
+    if (status === 'approved') {
+      // `payoutAmount` may legitimately be 0, so check for presence rather than
+      // truthiness. With no amount supplied the pipeline's figure stands.
+      if (payoutAmount !== undefined) claim.payoutAmount = payoutAmount;
+      claim.payoutStatus = claim.payoutAmount > 0 ? 'pending' : 'none';
+      claim.rejectionReason = '';
+    } else {
+      // Reversing an earlier approval must also withdraw the pending payout;
+      // leaving it behind would queue money against a claim that was refused.
+      claim.payoutAmount = 0;
+      claim.payoutStatus = 'none';
+      claim.rejectionReason = status === 'rejected' ? reviewNotes || 'Claim rejected by admin' : '';
     }
-    if (status === 'approved' && payoutAmount) {
-      claim.payoutAmount = payoutAmount;
-      claim.payoutStatus = 'pending';
-    }
+
     await claim.save();
 
     // Log action
@@ -195,24 +236,30 @@ exports.reviewClaim = async (req, res) => {
       action: status === 'approved' ? 'approve_claim' : status === 'rejected' ? 'reject_claim' : 'request_review',
       targetType: 'claim',
       targetId: claim._id.toString(),
-      details: { reviewNotes, payoutAmount },
+      details: { reviewNotes, payoutAmount: claim.payoutAmount, previousStatus },
       ipAddress: req.ip,
     });
 
     // Notify farmer
     if (claim.userId) {
-      await Notification.create({
-        userId: claim.userId,
-        title: status === 'approved' ? 'Claim Approved!' : status === 'rejected' ? 'Claim Rejected' : 'Claim Under Review',
-        message: reviewNotes || `Your claim ${claim.documentId} has been ${status}.`,
-        type: 'claim_update',
-        relatedClaim: claim._id,
-      });
+      try {
+        await Notification.create({
+          userId: claim.userId,
+          title:
+            status === 'approved' ? 'Claim Approved' : status === 'rejected' ? 'Claim Rejected' : 'Claim Under Review',
+          message: reviewNotes || `Your claim ${claim.documentId} has been ${status}.`,
+          type: 'claim_update',
+          relatedClaim: claim._id,
+        });
+      } catch (err) {
+        // The review itself succeeded; a failed notification must not undo it.
+        console.error(`[ADMIN:REVIEW] Notification not created for claim ${claim.documentId}:`, err.message);
+      }
     }
 
     res.json({ success: true, claim });
   } catch (err) {
-    console.error('❌ reviewClaim:', err);
+    console.error('[ADMIN:REVIEW] Failed to review claim:', err.message);
     res.status(500).json({ success: false, error: 'Failed to review claim' });
   }
 };
@@ -220,9 +267,7 @@ exports.reviewClaim = async (req, res) => {
 /* ─── Activity Logs ─── */
 exports.activityLogs = async (req, res) => {
   try {
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 50;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = readPaging(req, { defaultLimit: 50, maxLimit: 200 });
 
     const [logs, total] = await Promise.all([
       AdminAction.find().sort({ createdAt: -1 }).skip(skip).limit(limit).populate('adminId', 'phoneNumber fullName'),
@@ -231,7 +276,7 @@ exports.activityLogs = async (req, res) => {
 
     res.json({ success: true, logs, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
-    console.error('❌ activityLogs:', err);
+    console.error('[ADMIN:LOGS] Failed to fetch logs:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch logs' });
   }
 };

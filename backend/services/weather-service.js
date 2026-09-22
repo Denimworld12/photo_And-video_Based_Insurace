@@ -52,7 +52,7 @@ class WeatherService {
             }
 
             if (!this.apiKey || this.apiKey === 'your_openweathermap_api_key_here') {
-                console.warn('⚠️ Weather API Key not configured. Using mock data.');
+                console.warn('[WEATHER] WEATHER_API_KEY not configured, returning mock data');
                 return this._getMockWeatherData(lat, lon);
             }
 
@@ -79,7 +79,7 @@ class WeatherService {
 
             return weatherData;
         } catch (error) {
-            console.error('❌ Weather API Error:', error.message);
+            console.error('[WEATHER] API request failed, falling back to mock data:', error.message);
             // Fallback to mock data in case of error to prevent blocking
             return this._getMockWeatherData(lat, lon);
         }
@@ -143,7 +143,7 @@ class WeatherService {
             };
 
         } catch (error) {
-            console.error('Weather verification failed:', error);
+            console.error('[WEATHER] Verification failed:', error.message);
             return {
                 status: 'UNKNOWN',
                 score: 0.5,
