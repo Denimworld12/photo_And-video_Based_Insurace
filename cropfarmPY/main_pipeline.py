@@ -379,7 +379,6 @@ def assess_crop_damage(
             'sum_insured': sum_insured,
             'damage_percent': round(avg_damage, 1),
             'payout_amount': round(payout, 2),
-            'payout_recommended': claim_decision == 'APPROVE',
             'currency': 'INR'
         },
         

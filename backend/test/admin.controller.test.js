@@ -27,13 +27,22 @@ test('an amount the admin typed always wins, including an explicit zero', () => 
   assert.strictEqual(resolveApprovedPayout(manualReviewClaim(60000), 0), 0);
 });
 
-test('a claim with no usable pipeline figure keeps its stored amount', () => {
-  assert.strictEqual(resolveApprovedPayout({ payoutAmount: 30000 }, undefined), 30000);
+test('a claim the pipeline never assessed resolves to no figure at all', () => {
+  // reviewClaim turns this into a 400 asking for an explicit amount. Settling
+  // on 0 here approved a farmer for nothing and notified them it was approved.
+  assert.strictEqual(resolveApprovedPayout({ payoutAmount: 30000 }, undefined), null);
+  assert.strictEqual(resolveApprovedPayout({ processingResult: {} }, undefined), null);
   assert.strictEqual(
     resolveApprovedPayout({ payoutAmount: 30000, processingResult: { payout_calculation: {} } }, undefined),
-    30000
+    null
   );
-  assert.strictEqual(resolveApprovedPayout(manualReviewClaim('lots'), undefined), 0);
+  assert.strictEqual(resolveApprovedPayout(manualReviewClaim('lots'), undefined), null);
+  assert.strictEqual(resolveApprovedPayout(manualReviewClaim(-1), undefined), null);
+});
+
+test('an explicit amount approves a claim the pipeline never assessed', () => {
+  assert.strictEqual(resolveApprovedPayout({ processingResult: {} }, 50000), 50000);
+  assert.strictEqual(resolveApprovedPayout({ processingResult: {} }, 0), 0);
 });
 
 test('a failed pipeline run approves no payout on its own', () => {

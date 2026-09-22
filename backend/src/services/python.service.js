@@ -227,12 +227,6 @@ const fallbackResult = (reason = 'Pipeline unavailable', stage = 'unknown') => (
     note: 'No payout calculated: automated analysis did not complete.',
   },
   verification_results: {},
-  verification_evidence: {
-    authenticity_verified: false,
-    location_verified: false,
-    weather_verified: false,
-    processing_note: reason,
-  },
 });
 
 /**

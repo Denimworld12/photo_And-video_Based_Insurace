@@ -85,11 +85,15 @@ const discardUpload = (filePath) => {
   });
 };
 
-/** Coverage the claim's scheme carries on a policy, or null when it has none. */
+/**
+ * Coverage the claim's scheme carries on a policy, or null when no scheme on
+ * that policy matches. `claim.scheme` is free text, so guessing at the first
+ * scheme of a multi-scheme policy would price the claim against coverage the
+ * farmer never chose - an unmatched scheme is unresolved, and the caller logs
+ * it and falls back to the documented default.
+ */
 const schemeMaxAmount = (policy, claim) => {
-  if (!policy?.schemes?.length) return null;
-  const scheme =
-    policy.schemes.find((s) => s.code === claim.scheme || s.name === claim.scheme) || policy.schemes[0];
+  const scheme = policy?.schemes?.find((s) => s.code === claim.scheme);
   const maxAmount = Number(scheme?.coverage?.maxAmount);
   return Number.isFinite(maxAmount) && maxAmount > 0 ? maxAmount : null;
 };

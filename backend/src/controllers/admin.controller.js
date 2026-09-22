@@ -12,20 +12,21 @@ const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const SETTLED_STATUSES = ['payout_complete'];
 
 /**
- * Payout to record when an admin approves a claim.
+ * Payout to record when an admin approves a claim, or null when there is no
+ * figure to record.
  *
  * An explicit amount always wins, including an explicit 0. With none supplied
- * the pipeline's own calculated figure is adopted, because a claim that was
- * routed to manual_review is stored with payoutAmount 0 - approving it without
- * typing an amount would otherwise approve the farmer for nothing.
+ * the pipeline's own calculated figure is adopted, because a claim routed to
+ * manual_review is stored with payoutAmount 0 - approving it without typing an
+ * amount would otherwise approve the farmer for nothing. A claim the pipeline
+ * never assessed has no figure at all, and null makes the caller ask for one
+ * rather than silently settling on zero.
  */
 const resolveApprovedPayout = (claim, requestedAmount) => {
   if (requestedAmount !== undefined) return requestedAmount;
 
   const calculated = Number(claim.processingResult?.payout_calculation?.payout_amount);
-  if (Number.isFinite(calculated) && calculated >= 0) return calculated;
-
-  return claim.payoutAmount || 0;
+  return Number.isFinite(calculated) && calculated >= 0 ? calculated : null;
 };
 
 const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
@@ -224,6 +225,18 @@ exports.reviewClaim = async (req, res) => {
       });
     }
 
+    let approvedPayout = null;
+    if (status === 'approved') {
+      approvedPayout = resolveApprovedPayout(claim, payoutAmount);
+      if (approvedPayout === null) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'This claim has no calculated payout figure, so approving it requires an explicit payoutAmount',
+        });
+      }
+    }
+
     claim.status = status;
     claim.reviewedBy = req.user._id;
     // Only overwrite the notes when new ones were supplied, so a review that
@@ -232,7 +245,7 @@ exports.reviewClaim = async (req, res) => {
     claim.reviewedAt = new Date();
 
     if (status === 'approved') {
-      claim.payoutAmount = resolveApprovedPayout(claim, payoutAmount);
+      claim.payoutAmount = approvedPayout;
       claim.payoutStatus = claim.payoutAmount > 0 ? 'pending' : 'none';
       claim.rejectionReason = '';
     } else {

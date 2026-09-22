@@ -19,14 +19,28 @@ test('a claim filed against a seed policy uses that policy coverage, not the def
   // DEFAULT_SUM_INSURED paid PMFBY claims on half the quoted coverage.
   const pmfby = SEED_POLICIES.find((p) => p.code === 'PMFBY');
 
-  const byId = await resolveSumInsured({ insuranceId: pmfby._id });
+  const byId = await resolveSumInsured({ insuranceId: pmfby._id, scheme: pmfby.schemes[0].code });
   assert.strictEqual(byId.sumInsured, pmfby.schemes[0].coverage.maxAmount);
   assert.strictEqual(byId.source, 'seed:PMFBY');
 
-  const byCode = await resolveSumInsured({ insuranceId: 'wbcis' });
   const wbcis = SEED_POLICIES.find((p) => p.code === 'WBCIS');
+  const byCode = await resolveSumInsured({ insuranceId: 'wbcis', scheme: wbcis.schemes[0].code });
   assert.strictEqual(byCode.sumInsured, wbcis.schemes[0].coverage.maxAmount);
   assert.strictEqual(byCode.source, 'seed:WBCIS');
+});
+
+test('a scheme that matches no scheme on the policy is unresolved, not the first one', async () => {
+  // claim.scheme is free text. Falling through to policy.schemes[0] priced a
+  // mistyped or blank scheme against coverage the farmer never chose, and that
+  // figure multiplies straight into the payout.
+  const pmfby = SEED_POLICIES.find((p) => p.code === 'PMFBY');
+  const fallback = Number(process.env.DEFAULT_SUM_INSURED) || 100000;
+
+  for (const scheme of ['', undefined, 'PMFBY Basic Coverage', 'pmfby001', 'NOT-A-SCHEME']) {
+    const resolved = await resolveSumInsured({ insuranceId: pmfby._id, scheme });
+    assert.strictEqual(resolved.sumInsured, fallback, `scheme: ${String(scheme)}`);
+    assert.strictEqual(resolved.source, 'default');
+  }
 });
 
 test('an unresolvable policy reference still falls back to the default sum insured', async () => {
