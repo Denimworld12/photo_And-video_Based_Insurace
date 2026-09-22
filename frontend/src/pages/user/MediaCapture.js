@@ -240,6 +240,8 @@ export default function MediaCapture() {
 
   const capturedCount = Object.keys(capturedBlobs).length;
   const allCaptured = CAPTURE_STEPS.every((s) => capturedBlobs[s.id]);
+  const missingCoords = Object.values(capturedBlobs).filter((cd) => cd.coords?.lat == null).length;
+  const canSubmit = capturedCount > 0 && missingCoords === 0;
   const activeStep = CAPTURE_STEPS[currentStep];
 
   return (
@@ -277,8 +279,8 @@ export default function MediaCapture() {
             <div className="flex flex-wrap items-start gap-3 rounded-md border border-honey-amber bg-honey-amber/20 px-3 py-2.5">
               <MapPinOff className="mt-0.5 h-4 w-4 shrink-0 text-saddle" aria-hidden="true" />
               <p className="min-w-0 flex-1 text-body text-saddle">
-                <span className="font-medium">Your location is not available.</span> Photos will be sent without GPS
-                coordinates, which usually means your claim needs a manual field visit before it can be paid.
+                <span className="font-medium">Your location is not available.</span> Evidence photos cannot be
+                submitted without it — allow location access, then take the photos again.
               </p>
               {geoState === 'denied' && (
                 <button type="button" onClick={retryLocation} className="btn btn-outline btn-sm">
@@ -464,10 +466,17 @@ export default function MediaCapture() {
               faster and needs fewer field visits.
             </p>
           )}
+          {missingCoords > 0 && (
+            <p className="mb-3 flex items-start gap-2 text-body text-saddle">
+              <MapPinOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {missingCoords} photo{missingCoords === 1 ? ' was' : 's were'} taken without a location fix and cannot be
+              submitted. Turn location on, then retake {missingCoords === 1 ? 'it' : 'them'}.
+            </p>
+          )}
           <button
             type="button"
             onClick={() => setConfirmOpen(true)}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !canSubmit}
             className="btn btn-primary w-full"
           >
             {isSubmitting ? (
@@ -499,7 +508,7 @@ export default function MediaCapture() {
         }
         summary={[
           { label: 'Photos', value: `${capturedCount} of ${CAPTURE_STEPS.length}` },
-          { label: 'Location', value: geoState === 'ok' ? 'GPS attached' : 'Not available' },
+          { label: 'Location', value: 'GPS attached to every photo' },
           { label: 'Claim', value: documentId },
         ]}
         confirmLabel={allCaptured ? 'Submit photos' : 'Submit anyway'}

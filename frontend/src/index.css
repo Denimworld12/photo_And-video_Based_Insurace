@@ -238,24 +238,6 @@
     @apply mx-auto w-full max-w-5xl;
   }
 
-  .page-shell-wide {
-    @apply mx-auto w-full max-w-7xl;
-  }
-
-  /* -- Panel --
-     A flat surface: hairline border, 7.5px radius, no shadow. The
-     `surface` variants shift colour temperature instead of elevation. */
-  .panel {
-    @apply rounded-lg border border-bone bg-pure-white;
-  }
-
-  .panel-sunken {
-    @apply rounded-lg border border-bone bg-parchment;
-  }
-
-  .panel-inverted {
-    @apply rounded-lg border border-charcoal-olive bg-charcoal-olive text-parchment;
-  }
 
   /* -- Micro label --
      The small caps that head a definition-list term, a figure's caption or a
@@ -263,10 +245,5 @@
      letter-spacing lives here rather than inline in twenty-odd places. */
   .label-micro {
     @apply text-caption uppercase tracking-[0.08em] text-bark;
-  }
-
-  /* -- Hairline rule -- */
-  .hairline {
-    @apply border-t border-bone;
   }
 }

@@ -1,7 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { ClaimProvider } from './contexts/ClaimContext';
 import { ToastProvider } from './components/ui/Toast';
 import { LoadingState } from './components/ui/States';
 
@@ -116,11 +115,9 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <ClaimProvider>
-          <Router>
-            <AppRoutes />
-          </Router>
-        </ClaimProvider>
+        <Router>
+          <AppRoutes />
+        </Router>
       </AuthProvider>
     </ToastProvider>
   );

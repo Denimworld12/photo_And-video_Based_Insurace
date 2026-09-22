@@ -454,7 +454,7 @@ function ClaimDetail({
         )}
       </section>
 
-      {claim.processingResult && (
+      {claim.processingResult?.overall_assessment && (
         <section className="rounded-lg border border-bone bg-parchment p-4">
           <h3 className="eyebrow">AI assessment</h3>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">

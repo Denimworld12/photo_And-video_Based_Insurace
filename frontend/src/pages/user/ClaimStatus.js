@@ -46,17 +46,18 @@ export default function ClaimStatus() {
     try {
       setResubmitting(claim.documentId);
       const { data } = await api.post(`/api/claims/resubmit/${claim.documentId}`);
-      if (data.success && data.newDocumentId) {
+      const newId = data?.claim?.documentId;
+      if (data.success && newId) {
         setConfirmResubmit(null);
-        navigate(`/dashboard/media-capture/${data.newDocumentId}`);
+        navigate(`/dashboard/media-capture/${newId}`);
       } else {
         // The old code did nothing at all on this branch, so a refused
         // resubmission looked exactly like a successful one.
-        toast.error(data.message || 'The claim could not be reopened. Contact the helpline if this continues.');
+        toast.error(data?.error || 'The claim could not be reopened. Contact the helpline if this continues.');
         setConfirmResubmit(null);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'The claim could not be reopened. Try again in a moment.');
+      toast.error(err.response?.data?.error || 'The claim could not be reopened. Try again in a moment.');
       setConfirmResubmit(null);
     } finally {
       setResubmitting(null);

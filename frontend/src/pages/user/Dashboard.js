@@ -15,6 +15,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [claims, setClaims] = useState([]);
+  const [totalClaims, setTotalClaims] = useState(0);
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,6 +29,7 @@ export default function Dashboard() {
         api.get('/api/insurance/list'),
       ]);
       setClaims(claimsRes.data.claims || []);
+      setTotalClaims(claimsRes.data.pagination?.total ?? (claimsRes.data.claims || []).length);
       setPolicies(policiesRes.data.insurances || policiesRes.data.policies || []);
     } catch (err) {
       // Previously both requests were `.catch(() => empty)`, so a dead backend
@@ -43,7 +45,7 @@ export default function Dashboard() {
   }, [fetchData]);
 
   const stats = {
-    total: claims.length,
+    total: totalClaims,
     pending: claims.filter((c) => c && PENDING.includes(c.status)).length,
     approved: claims.filter((c) => c && SETTLED.includes(c.status)).length,
     rejected: claims.filter((c) => c && c.status === 'rejected').length,

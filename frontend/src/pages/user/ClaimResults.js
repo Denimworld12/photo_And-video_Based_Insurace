@@ -13,6 +13,8 @@ import {
   BarChart3, MapPin, Camera, Banknote, ChevronDown, FileText, Download, Sparkles,
 } from 'lucide-react';
 
+const SQ_METRES_PER_ACRE = 4046.86;
+
 /** Defined at module scope so toggling one section does not remount them all. */
 function Section({ id, title, icon: Icon, expanded, onToggle, children }) {
   return (
@@ -141,7 +143,7 @@ export default function ClaimResults() {
     try {
       setResubmitting(true);
       const { data } = await api.post(`/api/claims/resubmit/${documentId}`);
-      const newId = data?.claim?.documentId || data?.newDocumentId;
+      const newId = data?.claim?.documentId;
       if (data.success && newId) {
         setConfirmResubmit(false);
         navigate(`/dashboard/media-capture/${newId}`);
@@ -172,14 +174,14 @@ export default function ClaimResults() {
 
   const confidence = result.overall_assessment?.confidence_score || 0;
   const damageType = result.damage_type || 'Not classified';
-  const damagePercent = result.damage_percentage || 0;
+  const damagePercent =
+    result.damage_percentage ?? result.damage_assessment?.final_damage_percent ?? 0;
   const damagedAreaM2 = result.damaged_area_m2 || 0;
-  const damagedAreaAcres = result.damaged_area_acres || 0;
+  const damagedAreaAcres = damagedAreaM2 / SQ_METRES_PER_ACRE;
   const payout = result.payout_calculation || {};
   const imagesProcessed = result.images_processed || 0;
-  const totalFieldAreaM2 = result.total_field_area_m2 || result.area_info?.total_field_area_m2 || 0;
-  const areaMethod = result.area_estimation_method || result.area_info?.estimation_method || 'Estimated';
-  const imageDetails = result.image_details || [];
+  const totalFieldAreaM2 = result.area_info?.total_field_area_m2 || 0;
+  const areaMethod = result.area_info?.estimation_method || 'Estimated';
   const payoutAmount = payout.payout_amount || payout.final_payout_amount || 0;
   const evidence = claimInfo?.uploadedImages || [];
 
@@ -213,7 +215,7 @@ export default function ClaimResults() {
     y += 6;
     doc.text(`Percentage: ${damagePercent.toFixed(1)}%`, 20, y);
     y += 6;
-    doc.text(`Damaged area: ${damagedAreaM2.toFixed(1)} m2 (${damagedAreaAcres.toFixed(4)} acres)`, 20, y);
+    doc.text(`Damaged area: ${damagedAreaM2.toFixed(1)} m2 (${damagedAreaAcres.toFixed(2)} acres)`, 20, y);
     y += 6;
     doc.text(`Images analysed: ${imagesProcessed}`, 20, y);
     y += 12;
@@ -299,7 +301,7 @@ export default function ClaimResults() {
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 border-t border-bone pt-4 sm:grid-cols-3">
           <StatTile label="Damage type" value={damageType} />
-          <StatTile label="Area damaged" value={`${damagedAreaM2.toFixed(1)} m²`} hint={`${damagedAreaAcres.toFixed(4)} acres`} />
+          <StatTile label="Area damaged" value={`${damagedAreaM2.toFixed(1)} m²`} hint={`${damagedAreaAcres.toFixed(2)} acres`} />
           <StatTile label="Photos analysed" value={imagesProcessed} />
         </div>
       </section>
@@ -419,7 +421,7 @@ export default function ClaimResults() {
           {[
             { label: 'Total field', value: `${totalFieldAreaM2.toFixed(1)} m²` },
             { label: 'Damaged area', value: `${damagedAreaM2.toFixed(1)} m²` },
-            { label: 'Damaged (acres)', value: damagedAreaAcres.toFixed(4) },
+            { label: 'Damaged (acres)', value: damagedAreaAcres.toFixed(2) },
             { label: 'Method', value: areaMethod },
           ].map((d) => (
             <div key={d.label}>
@@ -430,35 +432,6 @@ export default function ClaimResults() {
         </dl>
       </Section>
 
-      {imageDetails.length > 0 && (
-        <Section
-          id="images"
-          title={`Per-photo analysis (${imageDetails.length})`}
-          icon={Camera}
-          expanded={expanded === 'images'}
-          onToggle={toggle}
-        >
-          <ul className="space-y-2">
-            {imageDetails.map((img, i) => (
-              <li key={i} className="rounded-md border border-bone bg-parchment p-3">
-                <p className="text-body font-medium text-ink">{img.step_id || `Photo ${i + 1}`}</p>
-                {img.coordinates && (
-                  <p className="mt-0.5 flex items-center gap-1 text-caption text-bark">
-                    <MapPin className="h-3 w-3" aria-hidden="true" />
-                    {img.coordinates.lat?.toFixed(6)}, {img.coordinates.lon?.toFixed(6)}
-                  </p>
-                )}
-                {img.damage_detected != null && (
-                  <p className="mt-0.5 text-caption text-saddle">
-                    Damage {img.damage_detected ? 'detected' : 'not detected'}
-                    {img.damage_level ? ` · ${img.damage_level}` : ''}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
 
       {claimInfo?.status === 'rejected' && (
         <section className="rounded-lg border border-saddle bg-saddle/5 p-5">

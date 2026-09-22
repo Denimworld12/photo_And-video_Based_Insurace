@@ -29,7 +29,7 @@ const STATUS = {
 
 const key = (status) => (status || '').toString().toLowerCase();
 
-export const statusMeta = (status) =>
+const statusMeta = (status) =>
   STATUS[key(status)] || {
     label: (status || 'Unknown').toString().replace(/_/g, ' '),
     Icon: FileText,
