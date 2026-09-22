@@ -288,7 +288,7 @@ export default function Landing() {
               <Eyebrow>Verification</Eyebrow>
               <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Four checks on every claim</h2>
               <p className="mt-4 text-body-lg text-saddle">
-                Each submitted photo passes independent checks before an assessment is produced, so genuine claims
+                Each claim passes independent checks before an assessment is produced, so genuine claims
                 move quickly and the rest are caught.
               </p>
             </div>

@@ -4,8 +4,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Layout
 
-Three independent pieces: `backend/` (Express + Mongoose API), `frontend/`, and the Python
-computer-vision pipeline.
+Three independent pieces: `backend/` (Express + Mongoose API), `frontend/` (React 19 via CRACO), and
+the Python computer-vision pipeline in `cropfarmPY/`. `readme.md` documents setup, every environment
+variable and the full API surface; keep it in step when you change any of them.
 
 ## Backend and Python pipeline
 
@@ -47,6 +48,36 @@ npm run dev       # nodemon; JWT_SECRET must be set
   and real OTP delivery.
 - `backend/.env.example` is the authoritative list of configuration; keep it current when adding a
   variable.
+
+## Frontend design system
+
+`frontend/src/index.css` is the single source of truth for every colour, type step, radius and
+spacing step — a "harvest ledger" palette (parchment canvas, ink text, one honey-amber accent)
+expressed as a Tailwind v4 `@theme` block plus a custom daisyUI theme named `harvest`.
+
+Rules that the whole of `frontend/src/` already follows, and that changes must keep:
+
+- No hardcoded hex, inline style colours or ad-hoc px sizes. Add the value to `index.css` first.
+  The one unavoidable exception is the canvas photo watermark, which reads the palette at runtime
+  through `src/utils/theme.js`.
+- No emoji anywhere in the UI. Use `lucide-react`.
+- No drop shadows. Surfaces separate by warm colour-temperature shifts and hairline borders.
+- No blue, red or other saturated primaries. Because the status colour range is deliberately
+  narrow, **no state may be signalled by colour alone** — pair it with an icon and a word.
+- Shared UI lives in `src/components/ui/` (Field, Modal, ConfirmDialog, Toast, States, PageHeader,
+  StatTile, StatusBadge, Pagination). Reach for these before writing a new one; `StatusBadge` is the
+  single claim-status vocabulary, keyed exactly on the underscore status enum in
+  `backend/src/models/Claim.js` — the only spelling the backend writes.
+- Form components must be defined at module scope. A component declared inside a render body gets
+  a new type each render, so React remounts its inputs and the field loses focus on every keystroke.
+
+Gotcha: the design system's layout spacing steps are named (`spacing-hair`, `-tight`, `-section`,
+`-gutter`, `-bay`, `-chapter`), not numbered. Binding `4px` to the numeric key `4` would redefine
+Tailwind's whole numeric scale and collapse every `w-4 h-4` icon to 4px.
+
+The frontend has **no test suite** (`npm test` finds no test files). Verify frontend work with
+`cd frontend && CI=true npx craco build` (CI=true turns lint warnings into failures) and by
+exercising the pages in a browser.
 
 ## Conventions
 
