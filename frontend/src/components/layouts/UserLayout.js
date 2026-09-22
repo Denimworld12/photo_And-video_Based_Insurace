@@ -5,10 +5,14 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import PortalLayout from './PortalLayout';
 
+// Filing, capturing and reviewing a claim is one journey that begins and ends
+// at My Claims, so every step of it keeps that item lit.
+const CLAIM_FLOW = ['/dashboard/submit-claim', '/dashboard/media-capture', '/dashboard/claim-results'];
+
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/dashboard/policies', label: 'Insurance Policies', icon: FileText },
-  { to: '/dashboard/claims', label: 'My Claims', icon: ClipboardList },
+  { to: '/dashboard/claims', label: 'My Claims', icon: ClipboardList, alsoActiveFor: CLAIM_FLOW },
   { to: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { to: '/dashboard/profile', label: 'Profile', icon: User },
   { to: '/dashboard/settings', label: 'Settings', icon: Settings },
@@ -20,7 +24,7 @@ const navItems = [
 const bottomNav = [
   { to: '/dashboard', label: 'Dashboard', short: 'Home', icon: LayoutDashboard, end: true },
   { to: '/dashboard/policies', label: 'Policies', short: 'Policies', icon: FileText },
-  { to: '/dashboard/claims', label: 'My Claims', short: 'Claims', icon: ClipboardList },
+  { to: '/dashboard/claims', label: 'My Claims', short: 'Claims', icon: ClipboardList, alsoActiveFor: CLAIM_FLOW },
   { to: '/dashboard/notifications', label: 'Notifications', short: 'Alerts', icon: Bell },
 ];
 

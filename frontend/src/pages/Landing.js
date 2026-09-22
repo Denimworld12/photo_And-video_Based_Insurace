@@ -58,7 +58,7 @@ const FRAUD_LAYERS = [
   { Icon: MapPin, label: 'GPS verification', desc: 'Photo location matched to the insured field' },
   { Icon: Camera, label: 'Image analysis', desc: 'Damage type and severity assessed from the photo' },
   { Icon: Eye, label: 'EXIF validation', desc: 'Capture metadata checked for tampering' },
-  { Icon: ShieldCheck, label: 'Cross-reference', desc: 'Weather and satellite records for the date claimed' },
+  { Icon: ShieldCheck, label: 'Cross-reference', desc: 'Weather records for the date and place claimed' },
 ];
 
 const BENEFITS = [

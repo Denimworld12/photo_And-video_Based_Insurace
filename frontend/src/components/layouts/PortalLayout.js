@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Menu, X, Download } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import usePWAInstall from '../../hooks/usePWAInstall';
@@ -18,6 +18,20 @@ import ConfirmDialog from '../ui/ConfirmDialog';
  * hamburger menu at the top of the screen is the wrong shape for one-handed
  * use in a field.
  */
+const withinPath = (pathname, base) => pathname === base || pathname.startsWith(`${base}/`);
+
+/**
+ * Whether a nav item is the current destination. `end` items match their own
+ * path only; the rest also match anything beneath it and any path under one of
+ * their `alsoActiveFor` prefixes, for deep screens that belong to that item
+ * without living under its URL.
+ */
+const isItemActive = (item, pathname) => {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  if (item.end) return path === item.to;
+  return [item.to, ...(item.alsoActiveFor || [])].some((base) => withinPath(path, base));
+};
+
 export default function PortalLayout({
   brandTitle,
   brandSubtitle,
@@ -61,7 +75,7 @@ export default function PortalLayout({
    * edge — the same signal in the shape each surface allows, rather than the
    * amber fill in one place and a bare colour shift in the other.
    */
-  const navLinkClass = ({ isActive }) =>
+  const navLinkClass = (isActive) =>
     `flex items-center gap-3 rounded-md border-l-2 py-2.5 pl-2.5 pr-3 text-body transition-colors ${
       isActive
         ? 'border-honey-amber bg-honey-amber/25 font-medium text-ink'
@@ -85,21 +99,37 @@ export default function PortalLayout({
       </div>
 
       <nav aria-label="Main" className="flex-1 space-y-1 overflow-y-auto p-3">
-        {navItems.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-            <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-            {item.label}
-          </NavLink>
-        ))}
+        {navItems.map((item) => {
+          const isActive = isItemActive(item, location.pathname);
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              aria-current={isActive ? 'page' : undefined}
+              className={navLinkClass(isActive)}
+            >
+              <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+              {item.label}
+            </Link>
+          );
+        })}
 
         {footerLinks.length > 0 && (
           <div className="mt-4 space-y-1 border-t border-bone pt-4">
-            {footerLinks.map((item) => (
-              <NavLink key={item.to} to={item.to} className={navLinkClass}>
-                <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                {item.label}
-              </NavLink>
-            ))}
+            {footerLinks.map((item) => {
+              const isActive = isItemActive(item, location.pathname);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={navLinkClass(isActive)}
+                >
+                  <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         )}
       </nav>
@@ -207,30 +237,27 @@ export default function PortalLayout({
           className="fixed inset-x-0 bottom-0 z-30 grid border-t border-bone bg-pure-white pb-[env(safe-area-inset-bottom)] lg:hidden"
           style={{ gridTemplateColumns: `repeat(${bottomNav.length}, minmax(0, 1fr))` }}
         >
-          {bottomNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `flex min-h-14 flex-col items-center justify-center gap-0.5 border-t-2 px-1 py-2 text-caption transition-colors ${
+          {bottomNav.map((item) => {
+            const isActive = isItemActive(item, location.pathname);
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex min-h-14 flex-col items-center justify-center gap-0.5 border-t-2 px-1 py-2 text-caption transition-colors ${
                   isActive
                     ? 'border-honey-amber bg-honey-amber/15 font-medium text-ink'
                     : 'border-transparent text-bark'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <item.icon
-                    className={`h-5 w-5 ${isActive ? 'text-ink' : 'text-bark'}`}
-                    aria-hidden="true"
-                  />
-                  <span>{item.short || item.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
+                }`}
+              >
+                <item.icon
+                  className={`h-5 w-5 ${isActive ? 'text-ink' : 'text-bark'}`}
+                  aria-hidden="true"
+                />
+                <span>{item.short || item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
       )}
 
