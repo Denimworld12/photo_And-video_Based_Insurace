@@ -164,7 +164,7 @@ agri-insurance/
 │       │   ├── layouts/           PortalLayout (shared shell), UserLayout, AdminLayout
 │       │   └── ui/                Field, Modal, ConfirmDialog, Toast, States,
 │       │                          PageHeader, StatTile, StatusBadge, Pagination
-│       ├── contexts/              AuthContext, ClaimContext
+│       ├── contexts/              AuthContext
 │       ├── hooks/                 usePWAInstall
 │       ├── pages/
 │       │   ├── admin/             Dashboard, UserManagement, PolicyManagement,
@@ -519,7 +519,7 @@ Before deploying, confirm that `OTP_MOCK_MODE=false`, `JWT_SECRET` is not the ex
 | `npm run dev` fails in `backend/` | `nodemon` is not a declared dependency. Install it globally or use `npm start`. |
 | Claims always come back as manual review with a fallback assessment | The backend could not run the pipeline. Check `PYTHON_COMMAND` and that `numpy`, `opencv-python` and `Pillow` are importable from that interpreter. |
 | Pipeline times out | It is capped at 60 seconds in `backend/src/services/python.service.js`. Large images are the usual cause. |
-| "Your location is not available" during photo capture | The browser refused or could not obtain GPS. Photos are uploaded without coordinates and the claim is flagged for a field visit. Geolocation also requires a secure context — `localhost` or HTTPS. |
+| "Your location is not available" during photo capture | The browser refused or could not obtain GPS. Evidence cannot be submitted without coordinates, so submission stays blocked until location is allowed (use **Try again**) and any photo taken without a fix is retaken. Geolocation also requires a secure context — `localhost` or HTTPS. |
 | The camera will not open | `getUserMedia` needs `localhost` or HTTPS, and browser camera permission. The gallery upload path is the fallback. |
 | Any OTP is accepted | `OTP_MOCK_MODE` is not set to `false`. This is the default. |
 | No install prompt for the PWA | Chrome and Edge only, over HTTPS or `localhost`. On iOS use Safari: Share, then Add to Home Screen. |
