@@ -87,11 +87,11 @@ test('determineDecision applies the default thresholds', async () => {
   });
 });
 
-test('readPipelinePayout reads the key the pipeline actually emits', () => {
+test('readPipelinePayout reads the only key the pipeline emits', () => {
   // main_pipeline.py emits `payout_amount`; the backend read `final_payout_amount`,
   // so every approved claim was persisted with a payout of 0.
   assert.strictEqual(readPipelinePayout({ payout_calculation: { payout_amount: 42500 } }), 42500);
-  assert.strictEqual(readPipelinePayout({ payout_calculation: { final_payout_amount: 999 } }), 999);
+  assert.strictEqual(readPipelinePayout({ payout_calculation: { final_payout_amount: 999 } }), 0);
   assert.strictEqual(readPipelinePayout({}), 0);
   assert.strictEqual(readPipelinePayout({ payout_calculation: { payout_amount: 'lots' } }), 0);
 });

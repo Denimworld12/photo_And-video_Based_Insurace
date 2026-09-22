@@ -73,7 +73,24 @@ test('claimUpload coerces the multipart strings to numbers', () => {
   assert.strictEqual(error, undefined);
   assert.strictEqual(value.lat, 19.1);
   assert.strictEqual(value.lon, 72.8);
-  assert.strictEqual(value.media_type, 'photo');
+});
+
+test('claimUpload does not let the client declare the media type', () => {
+  // The media type is derived from the uploaded file's own verified type; a
+  // photo declared as video would be dropped from the damage analysis. The
+  // options here are the ones the validate() middleware applies.
+  const { error, value } = schemas.claimUpload.validate(
+    {
+      parcel_id: 'CLM-1',
+      step_id: 'corner_1',
+      lat: '19.1',
+      lon: '72.8',
+      media_type: 'video',
+    },
+    { abortEarly: false, stripUnknown: true }
+  );
+  assert.strictEqual(error, undefined);
+  assert.strictEqual(value.media_type, undefined);
 });
 
 test('verifyOtp requires a six-digit numeric code', () => {

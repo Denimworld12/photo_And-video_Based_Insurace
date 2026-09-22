@@ -75,14 +75,11 @@ const assertUsableResult = (result) => {
 };
 
 /**
- * Read the payout the pipeline calculated.
- * `payout_amount` is what main_pipeline.py emits; `final_payout_amount` is
- * accepted so an older payload shape still resolves rather than silently
- * yielding a zero payout on an approved claim.
+ * Read the payout the pipeline calculated. `payout_amount` is the only key
+ * main_pipeline.py emits.
  */
 const readPipelinePayout = (result) => {
-  const payout = result?.payout_calculation || {};
-  const amount = Number(payout.payout_amount ?? payout.final_payout_amount);
+  const amount = Number(result?.payout_calculation?.payout_amount);
   return Number.isFinite(amount) && amount >= 0 ? amount : 0;
 };
 
@@ -96,7 +93,6 @@ const readPipelinePayout = (result) => {
  * @param {number}   opts.fieldSize      – known field m², omitted when unknown
  *                                         so the pipeline estimates it itself
  * @param {number}   opts.sumInsured
- * @param {number}   opts.claimedDamage  – percentage claimed by the farmer
  * @returns {Promise<object>}  parsed JSON from Python stdout
  * @throws  {PipelineError}
  */
@@ -122,9 +118,6 @@ const runPipeline = (imagePaths, opts = {}) => {
     }
     if (Number.isFinite(opts.sumInsured) && opts.sumInsured > 0) {
       args.push('--sum-insured', String(opts.sumInsured));
-    }
-    if (Number.isFinite(opts.claimedDamage)) {
-      args.push('--claimed-damage', String(opts.claimedDamage));
     }
     if (Number.isFinite(opts.userLat) && Number.isFinite(opts.userLon)) {
       args.push('--user-lat', String(opts.userLat), '--user-lon', String(opts.userLon));

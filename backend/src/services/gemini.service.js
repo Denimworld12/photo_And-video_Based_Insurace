@@ -146,14 +146,6 @@ function percent(value) {
   return Number.isFinite(n) ? `${n}%` : 'not measured';
 }
 
-/**
- * The pipeline reports the payout as `payout_amount`; `final_payout_amount` is
- * accepted so an older result stored on a claim still renders.
- */
-function payoutAmount(payout) {
-  return payout.payout_amount ?? payout.final_payout_amount;
-}
-
 function buildPrompt(pr, info) {
   const damage = pr.damage_assessment || {};
   const payout = pr.payout_calculation || {};
@@ -174,7 +166,6 @@ CLAIM INFORMATION:
 
 DAMAGE ASSESSMENT:
 - AI Calculated Damage: ${percent(damage.ai_calculated_damage_percent ?? damage.final_damage_percent)}
-- Farmer Claimed Damage: ${percent(damage.farmer_claimed_damage_percent)}
 - Final Damage Percentage: ${percent(damage.final_damage_percent)}
 - Severity: ${damage.severity || 'Unknown'}
 
@@ -191,7 +182,7 @@ ${pr.pipeline_failed ? '- NOTE: automated analysis did not complete; no damage m
 
 PAYOUT:
 - Sum Insured: INR ${rupees(payout.sum_insured)}
-- Calculated Payout: INR ${rupees(payoutAmount(payout))}
+- Calculated Payout: INR ${rupees(payout.payout_amount)}
 
 Respond with a JSON object:
 {
@@ -237,7 +228,7 @@ function fallbackSummary(pr, info) {
 
   let summary = `Claim ${info.documentId || ''} for ${info.cropType || 'crop'} damage has been assessed with ${Math.round(damagePercent)}% damage detected. `;
   if (status === 'approved') {
-    summary += `The claim has been approved with a payout of INR ${rupees(payoutAmount(payout))}.`;
+    summary += `The claim has been approved with a payout of INR ${rupees(payout.payout_amount)}.`;
   } else if (status === 'rejected') {
     summary += `The claim has been rejected. ${decision.reason || ''}`;
   } else {
@@ -255,7 +246,7 @@ function fallbackSummary(pr, info) {
     ],
     riskFactors: Number.isFinite(confidence) && confidence < 0.5 ? ['Low confidence score may indicate uncertain assessment'] : [],
     recommendations: status === 'manual_review' ? ['Manual field inspection recommended'] : [],
-    payoutJustification: Number.isFinite(Number(payoutAmount(payout))) && Number(payoutAmount(payout)) > 0
+    payoutJustification: Number(payout.payout_amount) > 0
       ? `Based on ${damagePercent}% verified damage on INR ${rupees(payout.sum_insured)} sum insured`
       : 'No payout calculated',
     generatedBy: 'fallback',

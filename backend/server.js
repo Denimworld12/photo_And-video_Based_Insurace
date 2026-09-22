@@ -68,15 +68,29 @@ try {
 // is the proxy's address unless the hop count is declared, which would make one
 // bucket for every client.
 if (process.env.TRUST_PROXY) {
-  const hops = parseInt(process.env.TRUST_PROXY, 10);
-  app.set('trust proxy', Number.isFinite(hops) ? hops : process.env.TRUST_PROXY);
+  const raw = process.env.TRUST_PROXY.trim();
+  const hops = Number(raw);
+  const setting =
+    raw === 'true' ? true : raw === 'false' ? false : Number.isInteger(hops) && hops >= 0 ? hops : raw;
+  try {
+    // Express compiles this eagerly, so an unusable value is caught here rather
+    // than surfacing as an opaque TypeError from proxy-addr.
+    app.set('trust proxy', setting);
+  } catch (err) {
+    fatal(
+      `TRUST_PROXY="${raw}" is not a usable trust proxy setting (${err.message}). ` +
+        'Use a hop count (e.g. 1), true/false, or a comma-separated list of trusted addresses.'
+    );
+  }
 }
 
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
-    // Uploads are served from this origin, so keep them from being rendered as
-    // documents in the same origin.
+    // Claim evidence under /uploads has to be loadable by the frontend, which
+    // runs on a different origin, so helmet's default same-origin CORP is
+    // relaxed here. This widens who may embed an upload, not who may read one:
+    // the filenames are unguessable and nosniff still applies.
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
@@ -192,7 +206,8 @@ app.use((error, _req, res, _next) => {
   if (error instanceof multer.MulterError) {
     const messages = {
       LIMIT_FILE_SIZE: `File too large (max ${Math.round(MAX_FILE_SIZE / (1024 * 1024))} MB)`,
-      LIMIT_UNEXPECTED_FILE: 'Unsupported file type. Upload a JPEG, PNG, WebP, HEIC or MP4/MOV/WebM file.',
+      LIMIT_UNEXPECTED_FILE:
+        'File rejected: its media type is not accepted, or it was not sent as the "image" field.',
       LIMIT_FILE_COUNT: 'Too many files in one request',
       LIMIT_FIELD_VALUE: 'A form field exceeded the allowed size',
     };
@@ -218,11 +233,22 @@ app.use((error, _req, res, _next) => {
 let server = null;
 let shuttingDown = false;
 
+// A claim being processed holds its request open for as long as the pipeline
+// runs, so draining connections is capped: past this point the process exits
+// rather than waiting for the supervisor to SIGKILL it mid-write.
+const FORCED_SHUTDOWN_MS = 10_000;
+
 const gracefulShutdown = async (exitCode = 0) => {
   if (shuttingDown) return;
   shuttingDown = true;
 
   console.log('Shutting down gracefully...');
+  const forced = setTimeout(() => {
+    console.error(`Shutdown did not finish within ${FORCED_SHUTDOWN_MS} ms, exiting now`);
+    process.exit(exitCode);
+  }, FORCED_SHUTDOWN_MS);
+  forced.unref();
+
   try {
     if (server) {
       await new Promise((resolve) => server.close(resolve));
@@ -234,6 +260,7 @@ const gracefulShutdown = async (exitCode = 0) => {
   } catch (err) {
     console.error('Error during shutdown:', err.message);
   }
+  clearTimeout(forced);
   process.exit(exitCode);
 };
 
@@ -262,8 +289,21 @@ server = app.listen(PORT, () => {
   console.log(`  CORS origins:  ${allowedOrigins.join(', ')}`);
   if (isMockMode()) {
     console.log('  OTP delivery:  MOCK - no SMS is sent, the code is returned in the send-otp response');
+  } else {
+    console.log('  OTP delivery:  SMS (Twilio)');
   }
   console.log('');
+  if (IS_PRODUCTION && !isMockMode()) {
+    console.error('  ############################################################');
+    console.error('  WARNING: PRODUCTION OTP DELIVERY IS NOT WIRED.');
+    console.error('  The Twilio send block in src/services/otp.service.js is still');
+    console.error('  commented out, so POST /api/auth/send-otp reports success');
+    console.error('  without sending any SMS. No account - including the admin');
+    console.error('  account - can complete login until SMS delivery is');
+    console.error('  implemented. Do not serve real users in this state.');
+    console.error('  ############################################################');
+    console.error('');
+  }
 });
 
 module.exports = app;

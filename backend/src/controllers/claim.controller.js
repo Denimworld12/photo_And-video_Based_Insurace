@@ -14,6 +14,7 @@ const {
   isPipelineAvailable,
 } = require('../services/python.service');
 const { summarizeClaimResult, isAvailable: isGeminiAvailable } = require('../services/gemini.service');
+const { SEED_POLICIES } = require('./policy.controller');
 
 // In-memory fallback for running without a database (development only). Entries
 // are keyed by documentId and always carry their owner, so the same ownership
@@ -83,38 +84,70 @@ const discardUpload = (filePath) => {
   });
 };
 
+/** Coverage the claim's scheme carries on a policy, or null when it has none. */
+const schemeMaxAmount = (policy, claim) => {
+  if (!policy?.schemes?.length) return null;
+  const scheme =
+    policy.schemes.find((s) => s.code === claim.scheme || s.name === claim.scheme) || policy.schemes[0];
+  const maxAmount = Number(scheme?.coverage?.maxAmount);
+  return Number.isFinite(maxAmount) && maxAmount > 0 ? maxAmount : null;
+};
+
 /**
  * Sum insured for a claim, taken from the policy it was filed against.
- * Falls back to DEFAULT_SUM_INSURED (100000) when the policy cannot be
- * resolved, and says so in the log, because a silently wrong sum insured
- * scales the payout.
+ *
+ * Stored policies win, then the seed policies policy.controller.js serves while
+ * the Policy collection is empty - a claim filed against one of those must be
+ * scaled on the coverage the farmer was actually quoted, since that is the
+ * out-of-box state of a fresh deployment. Only a genuinely unresolvable
+ * reference falls back to DEFAULT_SUM_INSURED (100000), and says so in the log,
+ * because a silently wrong sum insured scales the payout.
  */
 const resolveSumInsured = async (claim) => {
   const fallback = Number(process.env.DEFAULT_SUM_INSURED) || 100000;
   const reference = claim.policyId || claim.insuranceId;
-  if (!reference || !isDbConnected()) return { sumInsured: fallback, source: 'default' };
+  if (!reference) return { sumInsured: fallback, source: 'default' };
 
-  try {
-    const query = mongoose.isValidObjectId(reference)
-      ? { _id: reference }
-      : { code: String(reference).toUpperCase() };
-    const policy = await Policy.findOne(query);
-    if (!policy || !policy.schemes?.length) {
-      console.warn(`[CLAIM] No policy matched "${reference}", using default sum insured ${fallback}`);
-      return { sumInsured: fallback, source: 'default' };
+  if (isDbConnected()) {
+    try {
+      const query = mongoose.isValidObjectId(reference)
+        ? { _id: reference }
+        : { code: String(reference).toUpperCase() };
+      const policy = await Policy.findOne(query);
+      const maxAmount = schemeMaxAmount(policy, claim);
+      if (maxAmount) return { sumInsured: maxAmount, source: `policy:${policy.code}` };
+    } catch (err) {
+      console.warn(`[CLAIM] Policy lookup failed for "${reference}":`, err.message);
     }
-
-    const scheme =
-      policy.schemes.find((s) => s.code === claim.scheme || s.name === claim.scheme) || policy.schemes[0];
-    const maxAmount = Number(scheme?.coverage?.maxAmount);
-    if (!Number.isFinite(maxAmount) || maxAmount <= 0) {
-      return { sumInsured: fallback, source: 'default' };
-    }
-    return { sumInsured: maxAmount, source: `policy:${policy.code}` };
-  } catch (err) {
-    console.warn(`[CLAIM] Policy lookup failed for "${reference}":`, err.message);
-    return { sumInsured: fallback, source: 'default' };
   }
+
+  const seed = SEED_POLICIES.find(
+    (p) => p._id === String(reference) || p.code === String(reference).toUpperCase()
+  );
+  const seedAmount = schemeMaxAmount(seed, claim);
+  if (seedAmount) return { sumInsured: seedAmount, source: `seed:${seed.code}` };
+
+  console.warn(`[CLAIM] No policy matched "${reference}", using default sum insured ${fallback}`);
+  return { sumInsured: fallback, source: 'default' };
+};
+
+/**
+ * First usable capture location across a claim's evidence.
+ *
+ * (0, 0) is the sentinel the capture screen stores when the browser refuses
+ * geolocation, not a real reading. Forwarding it would have the pipeline score
+ * the claim against Null Island's weather, so it counts as "no location" and
+ * the pipeline skips weather verification instead.
+ */
+const pickCaptureCoordinates = (images = []) => {
+  for (const img of images) {
+    const lat = img?.coordinates?.lat;
+    const lon = img?.coordinates?.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (lat === 0 && lon === 0) continue;
+    return { userLat: lat, userLon: lon };
+  }
+  return { userLat: null, userLon: null };
 };
 
 /* ─── Initialize Claim ─── */
@@ -177,7 +210,7 @@ exports.uploadImage = async (req, res) => {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
-    const { lat, lon, client_ts, parcel_id, step_id, media_type } = req.body;
+    const { lat, lon, client_ts, parcel_id, step_id } = req.body;
     console.log(
       `[CLAIM:UPLOAD] parcel_id=${parcel_id}, step_id=${step_id}, file=${req.file.originalname} (${(req.file.size / 1024).toFixed(1)}KB)`
     );
@@ -220,7 +253,10 @@ exports.uploadImage = async (req, res) => {
       mimeType: req.file.mimetype,
       coordinates: coords,
       capturedAt: Number.isNaN(capturedAt.getTime()) ? new Date() : capturedAt,
-      mediaType: media_type || 'photo',
+      // Taken from the media type the upload allowlist already verified, not
+      // from a client-declared field: a photo mislabelled as video would be
+      // dropped from the analysis and force the claim to manual review.
+      mediaType: req.file.mimetype.toLowerCase().startsWith('video/') ? 'video' : 'photo',
     };
 
     if (isDbConnected()) {
@@ -289,15 +325,7 @@ exports.completeClaim = async (req, res) => {
       .filter((i) => i.localPath && i.mediaType === 'photo' && fs.existsSync(i.localPath))
       .map((i) => i.localPath);
 
-    let userLat = null;
-    let userLon = null;
-    for (const img of images) {
-      if (Number.isFinite(img.coordinates?.lat) && Number.isFinite(img.coordinates?.lon)) {
-        userLat = img.coordinates.lat;
-        userLon = img.coordinates.lon;
-        break;
-      }
-    }
+    const { userLat, userLon } = pickCaptureCoordinates(images);
 
     const { sumInsured, source: sumInsuredSource } = await resolveSumInsured(claim);
 
@@ -312,9 +340,6 @@ exports.completeClaim = async (req, res) => {
       decision = undeterminedDecision(pipelineFailure);
     } else {
       try {
-        // No claimed-damage figure is collected from the farmer today, so none
-        // is passed: the pipeline reports the damage it measures rather than a
-        // placeholder attributed to the farmer.
         pythonResult = await runPipeline(imagePaths, { userLat, userLon, sumInsured });
         decision = determineDecision(pythonResult.overall_assessment?.confidence_score);
       } catch (err) {
@@ -373,15 +398,29 @@ exports.completeClaim = async (req, res) => {
       completedAt: new Date(),
     };
 
+    // Only a claim still in 'processing' gets the automated verdict. A reviewer
+    // who decided it while the pipeline ran owns the outcome, and their decision
+    // (and payout) must not be overwritten by a run that started before it.
+    let appliedStatus = finalStatus;
+    let decisionApplied = true;
+
     if (isDbConnected()) {
-      await Claim.findOneAndUpdate({ documentId }, update, { new: true });
+      const persisted = await Claim.findOneAndUpdate({ documentId, status: 'processing' }, update, { new: true });
+      decisionApplied = Boolean(persisted);
+      if (!decisionApplied) {
+        const current = await Claim.findOne({ documentId });
+        appliedStatus = current?.status || claim.status;
+        console.warn(
+          `[CLAIM:COMPLETE] ${documentId}: claim is ${appliedStatus} and no longer processing, discarding the automated ${finalStatus} verdict`
+        );
+      }
     } else {
       saveToCache(documentId, { ...claim, ...(getFromCache(documentId) || {}), ...update });
     }
     transitioned = false;
 
     // Notify the claim owner, not whoever triggered processing.
-    if (isDbConnected()) {
+    if (isDbConnected() && decisionApplied) {
       try {
         await Notification.create({
           userId: claim.userId,
@@ -403,7 +442,7 @@ exports.completeClaim = async (req, res) => {
       success: true,
       message: 'Claim completed',
       pipelineFailed: Boolean(pipelineFailure),
-      claim: { documentId, status: finalStatus, completedAt: update.completedAt, processingResult },
+      claim: { documentId, status: appliedStatus, completedAt: update.completedAt, processingResult },
     });
   } catch (err) {
     console.error(`[CLAIM:COMPLETE] Failed to complete claim ${documentId}:`, err.message);
@@ -627,3 +666,5 @@ exports.summarizeClaim = async (req, res) => {
 
 // Exported for tests
 exports._claimCache = claimCache;
+exports._resolveSumInsured = resolveSumInsured;
+exports._pickCaptureCoordinates = pickCaptureCoordinates;

@@ -11,6 +11,23 @@ const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // change the record of a payment that was already made.
 const SETTLED_STATUSES = ['payout_complete'];
 
+/**
+ * Payout to record when an admin approves a claim.
+ *
+ * An explicit amount always wins, including an explicit 0. With none supplied
+ * the pipeline's own calculated figure is adopted, because a claim that was
+ * routed to manual_review is stored with payoutAmount 0 - approving it without
+ * typing an amount would otherwise approve the farmer for nothing.
+ */
+const resolveApprovedPayout = (claim, requestedAmount) => {
+  if (requestedAmount !== undefined) return requestedAmount;
+
+  const calculated = Number(claim.processingResult?.payout_calculation?.payout_amount);
+  if (Number.isFinite(calculated) && calculated >= 0) return calculated;
+
+  return claim.payoutAmount || 0;
+};
+
 const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
@@ -215,9 +232,7 @@ exports.reviewClaim = async (req, res) => {
     claim.reviewedAt = new Date();
 
     if (status === 'approved') {
-      // `payoutAmount` may legitimately be 0, so check for presence rather than
-      // truthiness. With no amount supplied the pipeline's figure stands.
-      if (payoutAmount !== undefined) claim.payoutAmount = payoutAmount;
+      claim.payoutAmount = resolveApprovedPayout(claim, payoutAmount);
       claim.payoutStatus = claim.payoutAmount > 0 ? 'pending' : 'none';
       claim.rejectionReason = '';
     } else {
@@ -280,3 +295,6 @@ exports.activityLogs = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch logs' });
   }
 };
+
+// Exported for tests
+exports._resolveApprovedPayout = resolveApprovedPayout;

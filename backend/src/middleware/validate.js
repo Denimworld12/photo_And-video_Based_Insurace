@@ -110,7 +110,8 @@ const schemas = {
   /**
    * Multipart fields that accompany an evidence upload. Everything arrives as a
    * string from multer, so coordinates are coerced and range-checked here rather
-   * than being trusted and stored as NaN.
+   * than being trusted and stored as NaN. The media type is not among them: it
+   * is derived from the uploaded file's own verified type.
    */
   claimUpload: Joi.object({
     parcel_id: Joi.string().max(100).required().messages({ 'any.required': 'parcel_id (claim document ID) is required' }),
@@ -124,7 +125,6 @@ const schemas = {
       'number.base': 'Longitude must be a number',
     }),
     client_ts: Joi.number().integer().min(0).optional(),
-    media_type: Joi.string().valid('photo', 'video').default('photo').optional(),
   }),
 
   completeClaim: Joi.object({

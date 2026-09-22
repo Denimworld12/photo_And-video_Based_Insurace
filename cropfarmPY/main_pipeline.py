@@ -7,8 +7,7 @@ Uses config.pkl for model configuration.
 
 Output contract (stdout, JSON):
 {
-    "damage_assessment":    { ai_calculated_damage_percent, farmer_claimed_damage_percent,
-                              final_damage_percent, severity },
+    "damage_assessment":    { ai_calculated_damage_percent, final_damage_percent, severity },
     "verification_results": { geolocation, weather, fraud_risk, exif, tampering },
     "overall_assessment":   { final_decision, confidence_score, risk_level,
                               manual_review_required, decision_reason },
@@ -202,7 +201,6 @@ def assess_crop_damage(
     image_paths: List[str],
     user_coords: Optional[Dict] = None,
     field_size_m2: Optional[float] = None,
-    farmer_claimed_damage: Optional[float] = None,
     sum_insured: float = 100000.0,
     api_key: Optional[str] = None
 ) -> Dict:
@@ -343,18 +341,6 @@ def assess_crop_damage(
     else:
         severity = 'negligible'
 
-    # The farmer's own damage estimate is reported alongside the measured one so
-    # a reviewer can see any over-claim. It deliberately does not feed the
-    # decision score: how to weigh a disputed self-estimate is a policy call,
-    # not something this pipeline should decide silently. When no estimate was
-    # supplied both fields are null rather than a stand-in number.
-    if farmer_claimed_damage is None:
-        claimed_percent = None
-        claim_discrepancy = None
-    else:
-        claimed_percent = round(float(farmer_claimed_damage), 1)
-        claim_discrepancy = round(float(farmer_claimed_damage) - float(avg_damage), 1)
-
     return {
         # CORE OUTPUT
         'damage_type': damage_type_name,
@@ -365,9 +351,7 @@ def assess_crop_damage(
         # DAMAGE ASSESSMENT (shape consumed by the Node backend and the AI summary)
         'damage_assessment': {
             'ai_calculated_damage_percent': round(avg_damage, 1),
-            'farmer_claimed_damage_percent': claimed_percent,
             'final_damage_percent': round(avg_damage, 1),
-            'claim_discrepancy_percent': claim_discrepancy,
             'damage_type': damage_type_name,
             'severity': severity
         },
@@ -428,20 +412,19 @@ def fail(message: str, exit_code: int = 1):
 def main():
     if len(sys.argv) < 2:
         fail('Usage: python main_pipeline.py <images> [--field-size N] [--sum-insured N] '
-             '[--claimed-damage N] [--user-lat N] [--user-lon N] [--api-key KEY]')
+             '[--user-lat N] [--user-lon N] [--api-key KEY]')
 
     try:
         # Parse arguments
         image_paths = []
         field_size = None
         sum_insured = 100000.0
-        claimed_damage = None
         user_lat = None
         user_lon = None
         api_key = None
 
         flags_with_value = {
-            '--field-size', '--sum-insured', '--claimed-damage',
+            '--field-size', '--sum-insured',
             '--user-lat', '--user-lon', '--api-key',
         }
 
@@ -458,8 +441,6 @@ def main():
                         field_size = float(value)
                     elif arg == '--sum-insured':
                         sum_insured = float(value)
-                    elif arg == '--claimed-damage':
-                        claimed_damage = float(value)
                     elif arg == '--user-lat':
                         user_lat = float(value)
                     elif arg == '--user-lon':
@@ -484,7 +465,6 @@ def main():
             image_paths=image_paths,
             user_coords=user_coords,
             field_size_m2=field_size,
-            farmer_claimed_damage=claimed_damage,
             sum_insured=sum_insured,
             api_key=api_key
         )
