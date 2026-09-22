@@ -1,62 +1,193 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import api from '../../utils/api';
-import {
-  ArrowLeft, RefreshCw, Loader2, CheckCircle2, XCircle,
-  AlertTriangle, Eye, BarChart3, MapPin, Camera, Banknote,
-  ChevronDown, ChevronUp, FileText, Download, Sparkles
-} from 'lucide-react';
 import jsPDF from 'jspdf';
+import api from '../../utils/api';
+import PageHeader from '../../components/ui/PageHeader';
+import StatusBadge from '../../components/ui/StatusBadge';
+import StatTile, { Meter } from '../../components/ui/StatTile';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { LoadingState, ErrorState } from '../../components/ui/States';
+import { useToast } from '../../components/ui/Toast';
+import {
+  ArrowLeft, RefreshCw, Loader2, CheckCircle2, XCircle, AlertTriangle, Eye,
+  BarChart3, MapPin, Camera, Banknote, ChevronDown, FileText, Download, Sparkles,
+} from 'lucide-react';
+
+const SQ_METRES_PER_ACRE = 4046.86;
+
+/** Defined at module scope so toggling one section does not remount them all. */
+function Section({ id, title, icon: Icon, expanded, onToggle, children }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-bone bg-pure-white">
+      <h2>
+        <button
+          type="button"
+          onClick={() => onToggle(id)}
+          aria-expanded={expanded}
+          aria-controls={`${id}-panel`}
+          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-parchment"
+        >
+          <span className="flex items-center gap-2 text-subheading text-ink">
+            <Icon className="h-4 w-4 text-bark" aria-hidden="true" /> {title}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-bark transition-transform ${expanded ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+        </button>
+      </h2>
+      {expanded && (
+        <div id={`${id}-panel`} className="border-t border-bone px-5 py-4">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const DECISION = {
+  APPROVE: {
+    Icon: CheckCircle2,
+    title: 'Approved',
+    message: 'Your claim passed assessment. The payout below is being processed.',
+    panel: 'border-sage bg-sage/15 text-deep-olive',
+  },
+  MANUAL_REVIEW: {
+    Icon: Eye,
+    title: 'Under review',
+    message: 'An assessor is checking your claim by hand. You will be notified when it is decided.',
+    panel: 'border-honey-amber bg-honey-amber/20 text-saddle',
+  },
+  REJECT: {
+    Icon: XCircle,
+    title: 'Rejected',
+    message: 'This claim was not accepted. You can resubmit with clearer evidence.',
+    panel: 'border-saddle bg-saddle/10 text-saddle',
+  },
+};
+
+const PROCESSING = {
+  Icon: Loader2,
+  title: 'Still processing',
+  message: 'The assessment is running. This page refreshes itself every few seconds.',
+  panel: 'border-bone bg-parchment text-saddle',
+};
 
 export default function ClaimResults() {
   const { documentId } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
   const [result, setResult] = useState(null);
   const [claimInfo, setClaimInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [expandedSection, setExpandedSection] = useState(null);
+  const [expanded, setExpanded] = useState(null);
   const [resubmitting, setResubmitting] = useState(false);
+  const [confirmResubmit, setConfirmResubmit] = useState(false);
   const [aiSummary, setAiSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
-  useEffect(() => { fetchResults(); }, [documentId]); // eslint-disable-line
-
-  const fetchResults = async () => {
-    try {
-      setLoading(true); setError(null);
-      const { data } = await api.get(`/api/claims/results/${documentId}`);
-      if (data.success && data.processing_result) {
-        setResult(data.processing_result);
-        setClaimInfo(data.claim || null);
-        // Check for embedded AI summary
-        if (data.processing_result.aiSummary) {
-          setAiSummary(data.processing_result.aiSummary);
+  const fetchResults = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        if (!silent) setLoading(true);
+        setError(null);
+        const { data } = await api.get(`/api/claims/results/${documentId}`);
+        if (data.success && data.processing_result) {
+          setResult(data.processing_result);
+          setClaimInfo(data.claim || null);
+          if (data.processing_result.aiSummary) setAiSummary(data.processing_result.aiSummary);
+        } else {
+          throw new Error('The assessment for this claim is not available yet.');
         }
-      } else throw new Error('Invalid response');
-    } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to load results');
-    } finally { setLoading(false); }
-  };
+      } catch (err) {
+        if (!silent) setError(err.response?.data?.message || err.message || 'We could not load this result.');
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [documentId]
+  );
 
-  const fetchAiSummary = async (refresh = false) => {
+  useEffect(() => {
+    fetchResults();
+  }, [fetchResults]);
+
+  const finalDecision = result?.overall_assessment?.final_decision;
+  const isProcessing = Boolean(result) && !DECISION[finalDecision];
+
+  // A claim still being assessed used to sit on a frozen screen with a
+  // non-spinning spinner icon, and the only way forward was a manual reload.
+  useEffect(() => {
+    if (!isProcessing) return undefined;
+    const timer = setInterval(() => fetchResults({ silent: true }), 8000);
+    return () => clearInterval(timer);
+  }, [isProcessing, fetchResults]);
+
+  const fetchAiSummary = async (refresh) => {
     try {
       setSummaryLoading(true);
-      const { data } = await api.get(`/api/claims/summarize/${documentId}`, { params: refresh ? { refresh: 1 } : {} });
+      const { data } = await api.get(`/api/claims/summarize/${documentId}`, {
+        params: refresh ? { refresh: 1 } : {},
+      });
       if (data.success && data.aiSummary) setAiSummary(data.aiSummary);
-    } catch { /* ignore */ }
-    finally { setSummaryLoading(false); }
+      else toast.error('The summary could not be generated right now.');
+    } catch {
+      toast.error('The summary could not be generated right now.');
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
   const handleResubmit = async () => {
     try {
       setResubmitting(true);
       const { data } = await api.post(`/api/claims/resubmit/${documentId}`);
-      if (data.success) navigate(`/dashboard/media-capture/${data.claim.documentId}`);
+      const newId = data?.claim?.documentId;
+      if (data.success && newId) {
+        setConfirmResubmit(false);
+        navigate(`/dashboard/media-capture/${newId}`);
+      } else {
+        // `data.claim.documentId` was read unguarded, so a differently shaped
+        // response crashed the page instead of reporting a failure.
+        toast.error(data?.error || 'The claim could not be reopened. Contact the helpline if this continues.');
+        setConfirmResubmit(false);
+      }
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to resubmit claim');
-    } finally { setResubmitting(false); }
+      toast.error(err.response?.data?.error || 'The claim could not be reopened. Try again in a moment.');
+      setConfirmResubmit(false);
+    } finally {
+      setResubmitting(false);
+    }
   };
+
+  if (loading) return <LoadingState label="Loading your assessment…" />;
+  if (error || !result) {
+    return (
+      <ErrorState
+        title="Result not available"
+        message={error || 'No assessment has been recorded for this claim yet.'}
+        onRetry={fetchResults}
+      />
+    );
+  }
+
+  const confidence = result.overall_assessment?.confidence_score || 0;
+  const damageType = result.damage_type || 'Not classified';
+  const damagePercent =
+    result.damage_percentage ?? result.damage_assessment?.final_damage_percent ?? 0;
+  const damagedAreaM2 = result.damaged_area_m2 || 0;
+  const damagedAreaAcres = damagedAreaM2 / SQ_METRES_PER_ACRE;
+  const payout = result.payout_calculation || {};
+  const imagesProcessed = result.images_processed || 0;
+  const totalFieldAreaM2 = result.area_info?.total_field_area_m2 || 0;
+  const areaMethod = result.area_info?.estimation_method || 'Estimated';
+  const payoutAmount = payout.payout_amount || payout.final_payout_amount || 0;
+  const evidence = claimInfo?.uploadedImages || [];
+
+  const verdict = DECISION[finalDecision] || PROCESSING;
+  const severity =
+    damagePercent > 60 ? 'Critical' : damagePercent > 35 ? 'Severe' : damagePercent > 15 ? 'Moderate' : 'Minimal';
 
   const downloadPDF = () => {
     const doc = new jsPDF();
@@ -68,339 +199,306 @@ export default function ClaimResults() {
 
     let y = 50;
     doc.setFontSize(14);
-    doc.text('Decision', 20, y); y += 8;
+    doc.text('Decision', 20, y);
+    y += 8;
     doc.setFontSize(10);
-    doc.text(`Status: ${decision.final_decision || 'PROCESSING'}`, 20, y); y += 6;
-    doc.text(`Confidence: ${(confidence * 100).toFixed(1)}%`, 20, y); y += 12;
+    doc.text(`Status: ${finalDecision || 'PROCESSING'}`, 20, y);
+    y += 6;
+    doc.text(`Confidence: ${(confidence * 100).toFixed(1)}%`, 20, y);
+    y += 12;
 
     doc.setFontSize(14);
-    doc.text('Damage Assessment', 20, y); y += 8;
+    doc.text('Damage Assessment', 20, y);
+    y += 8;
     doc.setFontSize(10);
-    doc.text(`Type: ${damageType}`, 20, y); y += 6;
-    doc.text(`Percentage: ${damagePercent.toFixed(1)}%`, 20, y); y += 6;
-    doc.text(`Damaged Area: ${damagedAreaM2.toFixed(1)} m² (${damagedAreaAcres.toFixed(4)} acres)`, 20, y); y += 6;
-    doc.text(`Images Analyzed: ${imagesProcessed}`, 20, y); y += 12;
+    doc.text(`Type: ${damageType}`, 20, y);
+    y += 6;
+    doc.text(`Percentage: ${damagePercent.toFixed(1)}%`, 20, y);
+    y += 6;
+    doc.text(`Damaged area: ${damagedAreaM2.toFixed(1)} m2 (${damagedAreaAcres.toFixed(2)} acres)`, 20, y);
+    y += 6;
+    doc.text(`Images analysed: ${imagesProcessed}`, 20, y);
+    y += 12;
 
-    if (payout && Object.keys(payout).length > 0) {
+    if (Object.keys(payout).length > 0) {
       doc.setFontSize(14);
-      doc.text('Payout Information', 20, y); y += 8;
+      doc.text('Payout', 20, y);
+      y += 8;
       doc.setFontSize(10);
-      doc.text(`Sum Insured: INR ${(payout.sum_insured || 0).toLocaleString('en-IN')}`, 20, y); y += 6;
-      doc.text(`Final Payout: INR ${(payout.payout_amount || payout.final_payout_amount || 0).toLocaleString('en-IN')}`, 20, y); y += 6;
+      doc.text(`Sum insured: INR ${(payout.sum_insured || 0).toLocaleString('en-IN')}`, 20, y);
+      y += 6;
+      doc.text(`Final payout: INR ${payoutAmount.toLocaleString('en-IN')}`, 20, y);
     }
 
     doc.save(`claim-report-${documentId}.pdf`);
+    toast.success('Report downloaded.');
   };
 
-  const toggle = (s) => setExpandedSection(expandedSection === s ? null : s);
-
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <span className="loading loading-spinner loading-lg text-primary" />
-      <h2 className="text-lg font-semibold text-base-content mt-4">Analyzing Your Claim...</h2>
-      <p className="text-sm text-base-content/40 mt-1 font-mono">{documentId}</p>
-    </div>
-  );
-
-  if (error || !result) return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <XCircle className="w-12 h-12 text-error mb-3" />
-      <h2 className="text-lg font-semibold text-base-content">Error Loading Results</h2>
-      <p className="text-sm text-error mt-1">{error || 'No results found'}</p>
-      <div className="flex gap-3 mt-6">
-        <button onClick={fetchResults} className="btn btn-ghost gap-2"><RefreshCw className="w-4 h-4" /> Retry</button>
-        <button onClick={() => navigate('/dashboard')} className="btn btn-primary">Dashboard</button>
-      </div>
-    </div>
-  );
-
-  const confidence = result.overall_assessment?.confidence_score || 0;
-  const decision = result.overall_assessment || {};
-  const damageType = result.damage_type || 'Unknown';
-  const damagePercent = result.damage_percentage || 0;
-  const damagedAreaM2 = result.damaged_area_m2 || 0;
-  const damagedAreaAcres = result.damaged_area_acres || 0;
-  const payout = result.payout_calculation || {};
-  const imagesProcessed = result.images_processed || 0;
-  const totalFieldAreaM2 = result.total_field_area_m2 || result.area_info?.total_field_area_m2 || 0;
-  const areaMethod = result.area_estimation_method || result.area_info?.estimation_method || 'ESTIMATED';
-  const imageDetails = result.image_details || [];
-
-  const decisionStyle = {
-    APPROVE: { alert: 'alert-success', Icon: CheckCircle2, bar: 'progress-success', msg: 'Your claim has been approved!' },
-    MANUAL_REVIEW: { alert: 'alert-warning', Icon: Eye, bar: 'progress-warning', msg: 'Your claim requires manual review.' },
-    REJECT: { alert: 'alert-error', Icon: XCircle, bar: 'progress-error', msg: 'Claim rejected — please recapture evidence.' },
-  }[decision.final_decision] || { alert: 'alert-info', Icon: Loader2, bar: 'progress-info', msg: 'Processing...' };
-
-  const severity = (p) => p > 60 ? 'Critical' : p > 35 ? 'Severe' : p > 15 ? 'Moderate' : 'Minimal';
-  const sevBadge = (p) => p > 60 ? 'badge-error' : p > 35 ? 'badge-warning' : p > 15 ? 'badge-info' : 'badge-success';
-
-  const Section = ({ id, title, icon: SIcon, children }) => (
-    <div className="card bg-base-100 shadow-sm border border-base-200">
-      <div className="card-body p-4">
-        <button onClick={() => toggle(id)} className="w-full flex items-center justify-between">
-          <h3 className="font-semibold text-base-content flex items-center gap-2">
-            <SIcon className="w-4 h-4 text-primary" /> {title}
-          </h3>
-          {expandedSection === id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        {expandedSection === id && <div className="mt-4 pt-4 border-t border-base-200">{children}</div>}
-      </div>
-    </div>
-  );
+  const toggle = (id) => setExpanded((cur) => (cur === id ? null : id));
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-base-content">Claim Analysis Result</h1>
-          <p className="text-xs text-base-content/40 font-mono mt-0.5">{documentId}</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={downloadPDF} className="btn btn-ghost btn-sm gap-1">
-            <Download className="w-4 h-4" /> PDF
-          </button>
-          <button onClick={() => navigate('/dashboard/claims')} className="btn btn-ghost btn-sm gap-1">
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-        </div>
-      </div>
-
-      {/* Decision Card */}
-      <div className={`alert ${decisionStyle.alert} shadow-md`}>
-        <decisionStyle.Icon className="w-8 h-8" />
-        <div>
-          <h2 className="text-lg font-bold">{decision.final_decision || 'PROCESSING'}</h2>
-          <p className="text-sm opacity-80">{decisionStyle.msg}</p>
-        </div>
-      </div>
-
-      {/* Confidence */}
-      <div className="card bg-base-100 shadow-sm border border-base-200">
-        <div className="card-body p-4">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-base-content/60">AI Confidence Score</span>
-            <span className="font-bold text-base-content">{(confidence * 100).toFixed(1)}%</span>
-          </div>
-          <progress className={`progress w-full ${decisionStyle.bar}`} value={confidence * 100} max="100" />
-        </div>
-      </div>
-
-      {/* AI Summary */}
-      <div className="card bg-base-100 shadow-sm border border-base-200">
-        <div className="card-body p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-base-content flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-secondary" /> AI Summary
-            </h3>
-            <button onClick={() => fetchAiSummary(!aiSummary)} disabled={summaryLoading} className="btn btn-ghost btn-xs gap-1">
-              {summaryLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              {aiSummary ? 'Refresh' : 'Generate'}
+    <div className="page-shell max-w-3xl space-y-5">
+      <PageHeader
+        eyebrow="Assessment"
+        title="Claim result"
+        description={documentId}
+        actions={
+          <>
+            <button type="button" onClick={downloadPDF} className="btn btn-outline btn-sm">
+              <Download className="h-4 w-4" aria-hidden="true" /> Report
             </button>
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/claims')}
+              className="btn btn-ghost btn-sm text-saddle"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> My claims
+            </button>
+          </>
+        }
+      />
+
+      <div className={`flex items-start gap-4 rounded-lg border p-5 ${verdict.panel}`}>
+        <verdict.Icon
+          className={`mt-0.5 h-7 w-7 shrink-0 ${isProcessing ? 'animate-spin' : ''}`}
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-subheading">{verdict.title}</h2>
+            {claimInfo?.status && <StatusBadge status={claimInfo.status} />}
           </div>
-          {summaryLoading ? (
-            <div className="flex items-center gap-2 text-sm text-base-content/50">
-              <Loader2 className="w-4 h-4 animate-spin" /> Generating AI summary…
-            </div>
-          ) : aiSummary ? (
-            <div className="space-y-3">
-              <p className="text-sm text-base-content/80">{aiSummary.summary}</p>
-              {aiSummary.keyFindings?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-base-content/50 uppercase mb-1">Key Findings</p>
-                  <ul className="list-disc list-inside text-xs text-base-content/60 space-y-0.5">
-                    {aiSummary.keyFindings.map((f, i) => <li key={i}>{f}</li>)}
-                  </ul>
-                </div>
-              )}
-              {aiSummary.recommendations?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-base-content/50 uppercase mb-1">Recommendations</p>
-                  <ul className="list-disc list-inside text-xs text-base-content/60 space-y-0.5">
-                    {aiSummary.recommendations.map((r, i) => <li key={i}>{r}</li>)}
-                  </ul>
-                </div>
-              )}
-              {aiSummary.payoutJustification && (
-                <div className="alert alert-info text-xs py-2">
-                  <Banknote className="w-3 h-3" /> {aiSummary.payoutJustification}
-                </div>
-              )}
-              <p className="text-[10px] text-base-content/30">
-                Generated by {aiSummary.generatedBy || 'AI'} · {aiSummary.generatedAt ? new Date(aiSummary.generatedAt).toLocaleString('en-IN') : ''}
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-base-content/40">Click "Generate" to create an AI-powered summary of this claim assessment.</p>
-          )}
+          <p className="mt-1 text-body">{verdict.message}</p>
         </div>
       </div>
 
-      {/* Damage Overview */}
-      <div className="card bg-base-100 shadow-sm border border-base-200">
-        <div className="card-body p-4">
-          <h3 className="font-semibold text-base-content flex items-center gap-2 mb-4">
-            <BarChart3 className="w-4 h-4 text-primary" /> Damage Assessment
-          </h3>
-          <div className="stats stats-vertical sm:stats-horizontal w-full bg-base-200/50">
-            <div className="stat py-3 px-4">
-              <div className="stat-title text-xs">Damage Type</div>
-              <div className="stat-value text-sm">{damageType}</div>
-            </div>
-            <div className="stat py-3 px-4">
-              <div className="stat-title text-xs">Damage</div>
-              <div className="stat-value text-2xl">{damagePercent.toFixed(1)}%</div>
-              <div className="stat-desc"><span className={`badge badge-sm ${sevBadge(damagePercent)}`}>{severity(damagePercent)}</span></div>
-            </div>
-            <div className="stat py-3 px-4">
-              <div className="stat-title text-xs">Area Damaged</div>
-              <div className="stat-value text-sm">{damagedAreaM2.toFixed(1)} m²</div>
-              <div className="stat-desc">{damagedAreaAcres.toFixed(4)} acres</div>
-            </div>
-            <div className="stat py-3 px-4">
-              <div className="stat-title text-xs">Images</div>
-              <div className="stat-value text-lg">{imagesProcessed}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Payout */}
-      {payout && Object.keys(payout).length > 0 && (
-        <div className="card bg-success/5 border-2 border-success/30 shadow-sm">
-          <div className="card-body p-4">
-            <h3 className="font-semibold text-base-content flex items-center gap-2 mb-4">
-              <Banknote className="w-4 h-4 text-success" /> Payout Information
-            </h3>
-            <div className="stats stats-vertical sm:stats-horizontal w-full bg-success/10">
-              <div className="stat py-3 px-4">
-                <div className="stat-title text-xs">Sum Insured</div>
-                <div className="stat-value text-sm">₹{(payout.sum_insured || 0).toLocaleString('en-IN')}</div>
+      {payoutAmount > 0 && (
+        <section className="rounded-lg border border-sage bg-sage/10 p-5">
+          <p className="eyebrow">Payout</p>
+          <p className="mt-1 text-heading text-deep-olive">₹{payoutAmount.toLocaleString('en-IN')}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-sage/40 pt-4 sm:grid-cols-3">
+            {[
+              { label: 'Sum insured', value: `₹${(payout.sum_insured || 0).toLocaleString('en-IN')}` },
+              { label: 'Damage applied', value: `${payout.damage_percent ?? damagePercent}%` },
+              { label: 'Status', value: finalDecision === 'APPROVE' ? 'Approved' : 'Pending decision' },
+            ].map((d) => (
+              <div key={d.label}>
+                <dt className="label-micro text-deep-olive/70">{d.label}</dt>
+                <dd className="text-body font-medium text-ink">{d.value}</dd>
               </div>
-              <div className="stat py-3 px-4">
-                <div className="stat-title text-xs">Damage Applied</div>
-                <div className="stat-value text-sm">{payout.damage_percent || damagePercent}%</div>
-              </div>
-              <div className="stat py-3 px-4">
-                <div className="stat-title text-xs">Final Payout</div>
-                <div className="stat-value text-xl text-success">₹{(payout.payout_amount || payout.final_payout_amount || 0).toLocaleString('en-IN')}</div>
-              </div>
-              <div className="stat py-3 px-4">
-                <div className="stat-title text-xs">Status</div>
-                <div className="stat-desc mt-1">
-                  <span className={`badge ${decision.final_decision === 'APPROVE' ? 'badge-success' : 'badge-warning'}`}>
-                    {decision.final_decision === 'APPROVE' ? 'APPROVED' : 'PENDING'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+            ))}
+          </dl>
+        </section>
       )}
 
-      {/* Area Info */}
-      <Section id="area" title="Area Information" icon={MapPin}>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div><p className="text-base-content/40 text-xs">Total Field</p><p className="font-medium">{totalFieldAreaM2.toFixed(1)} m²</p></div>
-          <div><p className="text-base-content/40 text-xs">Damaged Area</p><p className="font-medium">{damagedAreaM2.toFixed(1)} m²</p></div>
-          <div><p className="text-base-content/40 text-xs">Damaged (acres)</p><p className="font-medium">{damagedAreaAcres.toFixed(4)}</p></div>
-          <div><p className="text-base-content/40 text-xs">Method</p><span className="badge badge-info badge-sm">{areaMethod}</span></div>
+      <section className="rounded-lg border border-bone bg-pure-white p-5">
+        <h2 className="flex items-center gap-2 text-subheading text-ink">
+          <BarChart3 className="h-4 w-4 text-bark" aria-hidden="true" /> Damage assessment
+        </h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Meter label="AI confidence" value={confidence * 100} caption={`${(confidence * 100).toFixed(1)}%`} />
+          <Meter label="Damage" value={damagePercent} caption={`${damagePercent.toFixed(1)}% · ${severity}`} />
         </div>
-      </Section>
+        <div className="mt-4 grid grid-cols-2 gap-3 border-t border-bone pt-4 sm:grid-cols-3">
+          <StatTile label="Damage type" value={damageType} />
+          <StatTile label="Area damaged" value={`${damagedAreaM2.toFixed(1)} m²`} hint={`${damagedAreaAcres.toFixed(2)} acres`} />
+          <StatTile label="Photos analysed" value={imagesProcessed} />
+        </div>
+      </section>
 
-      {/* Uploaded Evidence Photos */}
-      {claimInfo?.uploadedImages?.length > 0 && (
-        <div className="card bg-base-100 shadow-sm border border-base-200">
-          <div className="card-body p-4">
-            <h3 className="font-semibold text-base-content flex items-center gap-2 mb-4">
-              <Camera className="w-4 h-4 text-primary" /> Evidence Photos ({claimInfo.uploadedImages.length})
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {claimInfo.uploadedImages.map((img, i) => (
-                <div key={i} className="relative aspect-video bg-base-200 rounded-xl overflow-hidden border border-base-300">
-                  {img.url ? (
-                    <img src={img.url} alt={img.stepId || `Evidence ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-base-content/30 text-sm">
-                      <Camera className="w-6 h-6" />
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                    <p className="text-white text-xs font-medium">{img.stepId || `Step ${i + 1}`}</p>
-                    {img.coordinates?.lat && (
-                      <p className="text-white/70 text-[10px] flex items-center gap-0.5">
-                        <MapPin className="w-2 h-2" />{img.coordinates.lat.toFixed(4)}, {img.coordinates.lon.toFixed(4)}
+      <section className="rounded-lg border border-bone bg-pure-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-subheading text-ink">
+            <Sparkles className="h-4 w-4 text-bark" aria-hidden="true" /> Plain-language summary
+          </h2>
+          <button
+            type="button"
+            onClick={() => fetchAiSummary(Boolean(aiSummary))}
+            disabled={summaryLoading}
+            className="btn btn-outline btn-sm"
+          >
+            {summaryLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            )}
+            {aiSummary ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
+
+        {summaryLoading ? (
+          <p className="mt-4 flex items-center gap-2 text-body text-bark">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Writing the summary…
+          </p>
+        ) : aiSummary ? (
+          <div className="mt-4 space-y-4">
+            <p className="text-body text-ink">{aiSummary.summary}</p>
+            {aiSummary.keyFindings?.length > 0 && (
+              <div>
+                <p className="eyebrow">Key findings</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body text-saddle">
+                  {aiSummary.keyFindings.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {aiSummary.recommendations?.length > 0 && (
+              <div>
+                <p className="eyebrow">What to do next</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-body text-saddle">
+                  {aiSummary.recommendations.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {aiSummary.payoutJustification && (
+              <p className="flex items-start gap-2 rounded-md border border-bone bg-parchment px-3 py-2.5 text-body text-saddle">
+                <Banknote className="mt-0.5 h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+                {aiSummary.payoutJustification}
+              </p>
+            )}
+            <p className="text-caption text-bark">
+              Generated by {aiSummary.generatedBy || 'AI'}
+              {aiSummary.generatedAt ? ` · ${new Date(aiSummary.generatedAt).toLocaleString('en-IN')}` : ''}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-4 text-body text-bark">
+            Generate a short, plain-language explanation of this assessment and what it means for your claim.
+          </p>
+        )}
+      </section>
+
+      {evidence.length > 0 && (
+        <section className="rounded-lg border border-bone bg-pure-white p-5">
+          <h2 className="flex items-center gap-2 text-subheading text-ink">
+            <Camera className="h-4 w-4 text-bark" aria-hidden="true" /> Your photos ({evidence.length})
+          </h2>
+          <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {evidence.map((img, i) => {
+              // The farmer view read `img.url` while the admin view read
+              // `img.cloudinaryUrl`, so one of the two always showed blanks.
+              const src = img.url || img.cloudinaryUrl;
+              return (
+                <li
+                  key={img._id || i}
+                  className="overflow-hidden rounded-md border border-bone bg-parchment"
+                >
+                  <div className="aspect-video">
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={`Evidence: ${img.stepId || `photo ${i + 1}`}`}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <Camera className="h-6 w-6 text-loam" aria-hidden="true" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-bone px-2 py-1.5">
+                    <p className="truncate text-caption text-saddle">{img.stepId || `Photo ${i + 1}`}</p>
+                    {img.coordinates?.lat != null && (
+                      <p className="flex items-center gap-1 truncate text-caption text-bark">
+                        <MapPin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {img.coordinates.lat.toFixed(4)}, {img.coordinates.lon.toFixed(4)}
                       </p>
                     )}
                   </div>
-                </div>
-              ))}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      <Section id="area" title="Area measurement" icon={MapPin} expanded={expanded === 'area'} onToggle={toggle}>
+        <dl className="grid grid-cols-2 gap-4">
+          {[
+            { label: 'Total field', value: `${totalFieldAreaM2.toFixed(1)} m²` },
+            { label: 'Damaged area', value: `${damagedAreaM2.toFixed(1)} m²` },
+            { label: 'Damaged (acres)', value: damagedAreaAcres.toFixed(2) },
+            { label: 'Method', value: areaMethod },
+          ].map((d) => (
+            <div key={d.label}>
+              <dt className="label-micro">{d.label}</dt>
+              <dd className="text-body text-ink">{d.value}</dd>
             </div>
-          </div>
-        </div>
-      )}
+          ))}
+        </dl>
+      </Section>
 
-      {/* Image Analysis Details */}
-      {imageDetails.length > 0 && (
-        <Section id="images" title={`Image Analysis (${imageDetails.length})`} icon={Camera}>
-          <div className="space-y-3">
-            {imageDetails.map((img, i) => (
-              <div key={i} className="p-3 bg-base-200 rounded-lg text-sm">
-                <p className="font-medium text-base-content">{img.step_id || `Image ${i + 1}`}</p>
-                {img.coordinates && (
-                  <p className="text-xs text-base-content/40 flex items-center gap-1 mt-1">
-                    <MapPin className="w-3 h-3" /> {img.coordinates.lat?.toFixed(6)}, {img.coordinates.lon?.toFixed(6)}
-                  </p>
-                )}
-                {img.damage_detected != null && (
-                  <p className="text-xs mt-1">Damage: {img.damage_detected ? 'Yes' : 'No'}{img.damage_level ? ` (${img.damage_level})` : ''}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
 
-      {/* Rejection + Resubmit */}
       {claimInfo?.status === 'rejected' && (
-        <div className="card bg-error/5 border-2 border-error/30">
-          <div className="card-body p-4">
-            <h3 className="font-semibold text-error flex items-center gap-2">
-              <XCircle className="w-4 h-4" /> Claim Rejected
-            </h3>
-            {claimInfo.rejectionReason && (
-              <div className="alert alert-error mt-3">
-                <AlertTriangle className="w-4 h-4" />
-                <div>
-                  <p className="text-xs font-medium">Reason</p>
-                  <p className="text-sm">{claimInfo.rejectionReason}</p>
-                </div>
-              </div>
+        <section className="rounded-lg border border-saddle bg-saddle/5 p-5">
+          <h2 className="flex items-center gap-2 text-subheading text-saddle">
+            <XCircle className="h-4 w-4" aria-hidden="true" /> This claim was rejected
+          </h2>
+          {claimInfo.rejectionReason && (
+            <p className="mt-3 flex items-start gap-2 rounded-md border border-saddle bg-saddle/10 px-3 py-2.5 text-body text-saddle">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                <span className="label-micro block text-saddle">Reason given</span>
+                {claimInfo.rejectionReason}
+              </span>
+            </p>
+          )}
+          <p className="mt-3 text-body text-saddle">
+            You can reopen this claim and take fresh photos that address the reason above.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfirmResubmit(true)}
+            disabled={resubmitting}
+            className="btn btn-primary mt-4"
+          >
+            {resubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
             )}
-            <p className="text-sm text-base-content/60 mt-2">You can resubmit this claim with updated evidence photos.</p>
-            <button onClick={handleResubmit} disabled={resubmitting} className="btn btn-error btn-sm mt-3 gap-2">
-              {resubmitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Resubmitting...</> : <><RefreshCw className="w-4 h-4" /> Resubmit with New Evidence</>}
-            </button>
-          </div>
-        </div>
+            Resubmit with new photos
+          </button>
+        </section>
       )}
 
-      {/* Resubmission Info */}
       {claimInfo?.resubmissionCount > 0 && (
-        <div className="alert alert-warning">
-          <FileText className="w-4 h-4" />
-          <span><strong>Resubmission #{claimInfo.resubmissionCount}</strong> — This claim was resubmitted from a previously rejected claim.</span>
-        </div>
+        <p className="flex items-start gap-2 rounded-md border border-bone bg-parchment px-4 py-3 text-body text-saddle">
+          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+          This is resubmission #{claimInfo.resubmissionCount} of an earlier rejected claim.
+        </p>
       )}
 
-      {/* Actions */}
-      <div className="flex gap-3">
-        <button onClick={() => navigate('/dashboard/claims')} className="btn btn-ghost flex-1">
-          <ArrowLeft className="w-4 h-4" /> My Claims
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard/claims')}
+          className="btn btn-outline flex-1"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All my claims
         </button>
-        <button onClick={() => navigate('/dashboard')} className="btn btn-primary flex-1">Dashboard</button>
+        <button type="button" onClick={() => navigate('/dashboard')} className="btn btn-primary flex-1">
+          Dashboard
+        </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmResubmit}
+        busy={resubmitting}
+        onCancel={() => setConfirmResubmit(false)}
+        onConfirm={handleResubmit}
+        title="Resubmit this claim?"
+        description="A fresh claim is opened from this one and you go back to photo capture. Make sure your new photos answer the rejection reason."
+        summary={[
+          { label: 'Claim', value: documentId },
+          { label: 'Reason', value: claimInfo?.rejectionReason || 'Not recorded' },
+        ]}
+        confirmLabel="Reopen and retake photos"
+      />
     </div>
   );
 }

@@ -1,178 +1,206 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import PageHeader from '../../components/ui/PageHeader';
+import StatTile from '../../components/ui/StatTile';
+import StatusBadge from '../../components/ui/StatusBadge';
+import { LoadingState, ErrorState, EmptyState } from '../../components/ui/States';
 import {
-  LayoutDashboard, Users, ClipboardCheck, FileText, Activity,
-  AlertTriangle, Banknote, CheckCircle2, XCircle, TrendingUp, ArrowRight, Eye
+  Users, ClipboardCheck, FileText, Activity, AlertTriangle, ArrowRight, Eye,
 } from 'lucide-react';
 
+const QUICK_ACTIONS = [
+  { to: '/admin/claims', label: 'Claim verification', desc: 'Approve or reject filed claims', Icon: ClipboardCheck },
+  { to: '/admin/users', label: 'Farmer management', desc: 'View and manage accounts', Icon: Users },
+  { to: '/admin/policies', label: 'Policy management', desc: 'Create and edit policies', Icon: FileText },
+  { to: '/admin/activity-logs', label: 'Activity logs', desc: 'Audit trail of admin actions', Icon: Activity },
+];
+
 export default function AdminDashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({});
   const [recentClaims, setRecentClaims] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/api/admin/dashboard');
-        if (data.success) {
-          setStats(data.stats || {});
-          setRecentClaims(data.recentClaims || []);
-        }
-      } catch { /* ignore */ }
-      finally { setLoading(false); }
-    })();
+  const fetchDashboard = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { data } = await api.get('/api/admin/dashboard');
+      if (!data.success) throw new Error(data.error || 'The dashboard data could not be read.');
+      setStats(data.stats || {});
+      setRecentClaims(data.recentClaims || []);
+    } catch (err) {
+      // The old page swallowed this and rendered every figure as 0 — an admin
+      // could not tell an empty platform from an unreachable API.
+      setError(err.response?.data?.error || err.message || 'The dashboard could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const statusBadge = (s) => ({
-    approved: 'badge-success', rejected: 'badge-error', processing: 'badge-warning',
-    submitted: 'badge-info', 'manual-review': 'badge-warning', manual_review: 'badge-warning',
-    'payout-complete': 'badge-success', 'payout-pending': 'badge-secondary',
-  }[s] || 'badge-ghost');
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard]);
 
+  if (loading) return <LoadingState label="Loading platform overview…" />;
+  if (error) return <ErrorState message={error} onRetry={fetchDashboard} />;
+
+  const pendingCount = stats.pendingClaims || 0;
+  const approvalRate =
+    stats.totalClaims > 0 ? (((stats.approvedClaims || 0) / stats.totalClaims) * 100).toFixed(1) : '0.0';
   const fmt = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-24">
-      <span className="loading loading-spinner loading-lg text-secondary" />
-    </div>
-  );
-
-  const pendingCount = (stats.pendingClaims || 0) + (stats.manualReviewClaims || 0);
-  const approvalRate = stats.totalClaims > 0 ? ((stats.approvedClaims || 0) / stats.totalClaims * 100).toFixed(1) : '0';
-
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
-      <div className="card bg-gradient-to-r from-secondary to-secondary/80 text-secondary-content shadow-lg">
-        <div className="card-body py-4 px-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2">
-                <LayoutDashboard className="w-6 h-6" /> Admin Dashboard
-              </h1>
-              <p className="text-sm opacity-80 mt-1">Crop Insurance Platform Overview</p>
-            </div>
-            <button onClick={() => navigate('/admin/claims')} className="btn btn-sm bg-white/20 border-0 hover:bg-white/30 text-secondary-content gap-2">
-              <Eye className="w-4 h-4" /> Review Claims
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="page-shell space-y-8">
+      <PageHeader
+        eyebrow="Administration"
+        title="Platform overview"
+        description="Claims, farmers and payouts across PBI AgriInsure."
+        actions={
+          <button type="button" onClick={() => navigate('/admin/claims')} className="btn btn-primary">
+            <Eye className="h-4 w-4" aria-hidden="true" /> Review claims
+          </button>
+        }
+      />
 
       {pendingCount > 0 && (
-        <div className="alert alert-warning shadow-md">
-          <AlertTriangle className="w-5 h-5" />
-          <div>
-            <h3 className="font-bold">{pendingCount} Claims Require Attention</h3>
-            <div className="text-xs">Claims awaiting manual review or approval</div>
+        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-honey-amber bg-honey-amber/20 px-5 py-4">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-saddle" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-body-lg font-medium text-ink">
+              {pendingCount} claim{pendingCount === 1 ? '' : 's'} waiting on you
+            </p>
+            <p className="text-body text-saddle">Submitted or flagged for manual review.</p>
           </div>
-          <button onClick={() => navigate('/admin/claims')} className="btn btn-sm btn-warning">Review Now</button>
+          <button type="button" onClick={() => navigate('/admin/claims')} className="btn btn-primary btn-sm">
+            Review now
+          </button>
         </div>
       )}
 
-      <div className="stats stats-vertical sm:stats-horizontal shadow w-full">
-        <div className="stat">
-          <div className="stat-figure text-primary"><Users className="w-8 h-8" /></div>
-          <div className="stat-title">Farmers</div>
-          <div className="stat-value text-primary">{stats.totalUsers ?? 0}</div>
-          <div className="stat-desc">Registered</div>
+      <section aria-labelledby="platform-figures">
+        <h2 id="platform-figures" className="eyebrow">
+          Platform figures
+        </h2>
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <StatTile label="Farmers" value={(stats.totalUsers ?? 0).toLocaleString('en-IN')} hint="Registered" icon={Users} />
+          <StatTile label="Claims" value={(stats.totalClaims ?? 0).toLocaleString('en-IN')} hint="Total filed" icon={ClipboardCheck} />
+          <StatTile label="Pending" value={pendingCount} hint="Awaiting review" emphasis={pendingCount > 0} icon={AlertTriangle} />
         </div>
-        <div className="stat">
-          <div className="stat-figure text-secondary"><ClipboardCheck className="w-8 h-8" /></div>
-          <div className="stat-title">Claims</div>
-          <div className="stat-value text-secondary">{stats.totalClaims ?? 0}</div>
-          <div className="stat-desc">Total Filed</div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <StatTile label="Approved" value={stats.approvedClaims ?? 0} />
+          <StatTile label="Rejected" value={stats.rejectedClaims ?? 0} />
+          <StatTile label="Approval rate" value={`${approvalRate}%`} />
         </div>
-        <div className="stat">
-          <div className="stat-figure text-warning"><AlertTriangle className="w-8 h-8" /></div>
-          <div className="stat-title">Pending</div>
-          <div className="stat-value text-warning">{pendingCount}</div>
-          <div className="stat-desc">Awaiting Review</div>
-        </div>
-        <div className="stat">
-          <div className="stat-figure text-accent"><Banknote className="w-8 h-8" /></div>
-          <div className="stat-title">Payouts</div>
-          <div className="stat-value text-accent text-2xl">₹{(stats.totalPayout || 0).toLocaleString('en-IN')}</div>
-          <div className="stat-desc">Disbursed</div>
-        </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { value: stats.approvedClaims ?? 0, label: 'Approved', Icon: CheckCircle2, color: 'text-success' },
-          { value: stats.rejectedClaims ?? 0, label: 'Rejected', Icon: XCircle, color: 'text-error' },
-          { value: `${approvalRate}%`, label: 'Approval Rate', Icon: TrendingUp, color: 'text-info' },
-        ].map(s => (
-          <div key={s.label} className="card bg-base-100 shadow-sm border border-base-200">
-            <div className="card-body items-center text-center p-3">
-              <s.Icon className={`w-5 h-5 ${s.color}`} />
-              <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
-              <div className="text-xs text-base-content/50">{s.label}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <h2 className="font-semibold text-base-content mb-3">Quick Actions</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: 'Farmer Management', to: '/admin/users', Icon: Users, desc: 'View & manage farmers' },
-            { label: 'Claim Review', to: '/admin/claims', Icon: ClipboardCheck, desc: 'Approve or reject' },
-            { label: 'Policy Management', to: '/admin/policies', Icon: FileText, desc: 'Create & edit policies' },
-            { label: 'Activity Logs', to: '/admin/activity-logs', Icon: Activity, desc: 'Audit trail' },
-          ].map(a => (
-            <button key={a.to} onClick={() => navigate(a.to)}
-              className="card bg-base-100 shadow-sm hover:shadow-md border border-base-200 transition-all">
-              <div className="card-body items-center text-center p-4 gap-1.5">
-                <a.Icon className="w-6 h-6 text-secondary" />
-                <span className="text-sm font-semibold">{a.label}</span>
-                <span className="text-xs text-base-content/40">{a.desc}</span>
-              </div>
+      <section aria-labelledby="admin-actions">
+        <h2 id="admin-actions" className="eyebrow">
+          Go to
+        </h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {QUICK_ACTIONS.map((a) => (
+            <button
+              key={a.to}
+              type="button"
+              onClick={() => navigate(a.to)}
+              className="flex items-center gap-4 rounded-lg border border-bone bg-pure-white p-4 text-left transition-colors hover:border-honey-amber"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-parchment">
+                <a.Icon className="h-5 w-5 text-saddle" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-body-lg font-medium text-ink">{a.label}</span>
+                <span className="block text-body text-bark">{a.desc}</span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-loam" aria-hidden="true" />
             </button>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="card bg-base-100 shadow-md">
-        <div className="card-body p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="card-title text-sm">Recent Claims</h2>
-            <button onClick={() => navigate('/admin/claims')} className="btn btn-ghost btn-sm gap-1">
-              View All <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-          {recentClaims.length === 0 ? (
-            <p className="text-sm text-base-content/40 py-6 text-center">No claims yet</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="table table-zebra table-sm">
-                <thead><tr><th>Claim ID</th><th>Farmer</th><th>Crop</th><th>AI Score</th><th>Status</th><th>Date</th></tr></thead>
-                <tbody>
-                  {recentClaims.slice(0, 10).map(c => {
-                    const confidence = c.processingResult?.overall_assessment?.confidence_score || c.confidenceScore || 0;
-                    return (
-                      <tr key={c._id || c.documentId} className="cursor-pointer hover" onClick={() => navigate('/admin/claims')}>
-                        <td className="font-mono text-xs">{c.documentId}</td>
-                        <td>{c.userId?.phoneNumber || c.userId?.fullName || '—'}</td>
-                        <td>{c.formData?.cropType || '—'}</td>
-                        <td>{confidence > 0 ? (
-                          <span className={`text-xs font-semibold ${confidence > 0.7 ? 'text-success' : confidence > 0.4 ? 'text-warning' : 'text-error'}`}>
-                            {(confidence * 100).toFixed(0)}%
-                          </span>
-                        ) : '—'}</td>
-                        <td><span className={`badge badge-sm ${statusBadge(c.status)}`}>{(c.status || '').replace(/_|-/g, ' ')}</span></td>
-                        <td className="text-base-content/40 text-xs">{c.createdAt ? fmt(c.createdAt) : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+      <section aria-labelledby="recent-claims">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="recent-claims" className="eyebrow">
+            Recent claims
+          </h2>
+          <button
+            type="button"
+            onClick={() => navigate('/admin/claims')}
+            className="btn btn-ghost btn-sm text-saddle"
+          >
+            View all <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
-      </div>
+
+        {recentClaims.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState icon={ClipboardCheck} title="No claims filed yet" message="Claims appear here as farmers submit them." />
+          </div>
+        ) : (
+          <div className="mt-3 overflow-hidden rounded-lg border border-bone bg-pure-white">
+            {/* The table is kept for desktop where six columns compare well,
+                and swapped for stacked rows on a phone rather than forcing a
+                horizontal scroll. */}
+            <ul className="divide-y divide-bone lg:hidden">
+              {recentClaims.slice(0, 10).map((c) => (
+                <li key={c.documentId}>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/claims')}
+                    className="flex w-full items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-parchment"
+                  >
+                    <span className="min-w-0">
+                      <span className="block font-mono text-caption text-bark">{c.documentId}</span>
+                      <span className="mt-0.5 block text-body font-medium capitalize text-ink">
+                        {c.cropType || 'Crop claim'}
+                      </span>
+                      <span className="block text-caption text-bark">
+                        {c.user?.fullName || c.user?.phoneNumber || 'Unknown farmer'}
+                        {c.createdAt ? ` · ${fmt(c.createdAt)}` : ''}
+                      </span>
+                    </span>
+                    <StatusBadge status={c.status} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <table className="hidden w-full lg:table">
+              <thead>
+                <tr className="border-b border-bone text-left">
+                  {['Claim ID', 'Farmer', 'Crop', 'Status', 'Filed'].map((h) => (
+                    <th key={h} className="px-4 py-3 label-micro font-medium">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-bone">
+                {recentClaims.slice(0, 10).map((c) => (
+                  <tr
+                    key={c.documentId}
+                    onClick={() => navigate('/admin/claims')}
+                    className="cursor-pointer transition-colors hover:bg-parchment"
+                  >
+                    <td className="px-4 py-3 font-mono text-caption text-saddle">{c.documentId}</td>
+                    <td className="px-4 py-3 text-body text-ink">
+                      {c.user?.fullName || c.user?.phoneNumber || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-body capitalize text-ink">{c.cropType || '—'}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={c.status} />
+                    </td>
+                    <td className="px-4 py-3 text-caption text-bark">{c.createdAt ? fmt(c.createdAt) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

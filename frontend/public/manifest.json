@@ -25,7 +25,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "theme_color": "#66cc8a",
-  "background_color": "#f2f2f2",
+  "theme_color": "#e8b672",
+  "background_color": "#fcfaf1",
   "categories": ["agriculture", "finance", "government"]
 }

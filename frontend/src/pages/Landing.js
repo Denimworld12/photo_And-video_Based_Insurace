@@ -1,443 +1,533 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import ThemeSwitcher from '../components/ThemeSwitcher';
 import usePWAInstall from '../hooks/usePWAInstall';
+import { APP_NAME, APP_TAGLINE, INDIAN_STATES, SUPPORT } from '../utils/constants';
 import {
-  ShieldCheck, Camera, Banknote, Smartphone,
-  Zap, Eye, Globe, Building2, ArrowRight, CheckCircle2,
-  Sprout, Phone, Mail, ChevronRight, MapPin, Users,
-  Award, TrendingUp, Leaf, Download
+  ShieldCheck, Camera, Banknote, Smartphone, Zap, Eye, Globe, Building2,
+  ArrowRight, CheckCircle2, Sprout, Phone, Mail, ChevronRight, MapPin,
+  Award, Leaf, Download,
 } from 'lucide-react';
 
-const Landing = () => {
+const PROMISES = [
+  { Icon: ShieldCheck, title: 'Government-backed premiums', desc: 'Low premiums subsidised under PMFBY and WBCIS for every major crop.' },
+  { Icon: Camera, title: 'Photo evidence, not paperwork', desc: 'Submit GPS-tagged photos from your own phone instead of waiting for an inspector.' },
+  { Icon: Banknote, title: 'Direct payouts', desc: 'Approved claims are paid straight into your bank account.' },
+];
+
+// These three steps were carried by stock clip-art (a red map pin, a cyan "AI"
+// orb, a stock photograph) — the loudest colour anywhere in the app and the
+// only place saturated red and teal appeared. The step is the content; an icon
+// and the numeral carry it in the same language as the rest of the product.
+const HOW_IT_WORKS = [
+  {
+    step: '01',
+    Icon: Camera,
+    title: 'Photograph the damage',
+    desc: 'Take GPS-tagged photos of the four corners of your field and the damaged crop, from your phone, standing in the field.',
+    detail: 'Five photos',
+  },
+  {
+    step: '02',
+    Icon: ShieldCheck,
+    title: 'The evidence is checked',
+    desc: 'Photo authenticity, GPS location, weather history for that date and damage severity are assessed automatically.',
+    detail: 'Four checks per photo',
+  },
+  {
+    step: '03',
+    Icon: Banknote,
+    title: 'Get your payout',
+    desc: 'Approved claims are paid directly into your bank account, with the full assessment visible to you.',
+    detail: 'Direct to your account',
+  },
+];
+
+// What the platform replaces, stated plainly, in place of an AI-generated
+// poster that claimed satellite monitoring and a blockchain network — neither
+// of which exists in this product.
+const COMPARISON = [
+  { stage: 'Reporting the loss', before: 'Paper form at the block office', after: 'Photos from your phone, in the field' },
+  { stage: 'Evidence', before: 'An inspector visits when one is free', after: 'GPS-tagged photos, checked on submission' },
+  { stage: 'Assessment', before: 'Manual survey and a written report', after: 'Automated damage assessment, reviewed by an officer' },
+  { stage: 'Waiting', before: 'Weeks, with no way to check', after: 'Live status at every stage' },
+  { stage: 'Payout', before: 'Cheque, after the file clears', after: 'Direct bank transfer on approval' },
+];
+
+const FRAUD_LAYERS = [
+  { Icon: MapPin, label: 'GPS verification', desc: 'Photo location matched to the insured field' },
+  { Icon: Camera, label: 'Image analysis', desc: 'Damage type and severity assessed from the photo' },
+  { Icon: Eye, label: 'EXIF validation', desc: 'Capture metadata checked for tampering' },
+  { Icon: ShieldCheck, label: 'Cross-reference', desc: 'Weather records for the date and place claimed' },
+];
+
+const BENEFITS = [
+  { Icon: Smartphone, title: 'Built for a phone', desc: 'The whole claim is filed one-handed from the field. No computer needed.' },
+  { Icon: ShieldCheck, title: 'Fraud protection', desc: 'GPS tagging, EXIF analysis and AI keep genuine claims moving and catch the rest.' },
+  { Icon: Zap, title: 'Minutes, not weeks', desc: 'Automated assessment replaces the wait for a field inspector.' },
+  { Icon: Eye, title: 'Nothing hidden', desc: 'You see the AI confidence, the damage assessment and the payout calculation.' },
+  { Icon: Globe, title: 'Works on a weak signal', desc: 'Installable on your phone, with pages that stay readable offline.' },
+  { Icon: Building2, title: 'Aligned with the schemes', desc: 'Supports PMFBY, WBCIS and other government crop insurance schemes.' },
+];
+
+const DASHBOARD_POINTS = [
+  'Live claim status at every stage',
+  'AI confidence and damage figures in full',
+  'Downloadable PDF assessment report',
+  'Notifications when a decision is made',
+];
+
+const TEAM = [
+  { name: 'Nikhil', role: 'Lead Developer', img: '/images/nikhil.png' },
+  { name: 'Gayatri', role: 'AI & Research', img: '/images/gayatri.jpg' },
+  { name: 'Umair', role: 'Backend Engineer', img: '/images/umair.jpg' },
+];
+
+function Eyebrow({ children }) {
+  return <p className="eyebrow">{children}</p>;
+}
+
+export default function Landing() {
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const { canInstall, promptInstall } = usePWAInstall();
 
   const handleGetStarted = () => {
-    if (isAuthenticated) {
-      navigate(user?.role === 'admin' ? '/admin' : '/dashboard');
-    } else {
-      navigate('/login');
-    }
+    if (isAuthenticated) navigate(user?.role === 'admin' ? '/admin' : '/dashboard');
+    else navigate('/login');
   };
 
   return (
-    <div className="min-h-screen bg-base-100">
-      {/* ── Navbar ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-base-100/95 backdrop-blur-sm border-b border-base-300">
-        <div className="max-w-7xl mx-auto flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
-          {/* Left – Brand */}
-          <div className="flex items-center gap-3 shrink-0">
-            <img src="/images/government-emblem.png" alt="Emblem" className="w-9 h-9 object-contain" />
-            <div className="leading-tight">
-              <span className="text-base font-bold text-base-content block">PBI AgriInsure</span>
-              <span className="text-[10px] text-base-content/50 hidden sm:block">Crop Insurance Platform</span>
+    <div className="min-h-screen bg-parchment">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-honey-amber focus:px-4 focus:py-2 focus:text-body focus:text-ink"
+      >
+        Skip to content
+      </a>
+
+      <nav className="fixed inset-x-0 top-0 z-50 border-b border-bone bg-parchment/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src="/images/government-emblem.png" alt="" className="h-9 w-9 shrink-0 object-contain" />
+            <div className="min-w-0 leading-tight">
+              <span className="block truncate text-body font-medium text-ink">{APP_NAME}</span>
+              <span className="hidden text-caption text-bark sm:block">{APP_TAGLINE}</span>
             </div>
           </div>
 
-          {/* Right – Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {canInstall && (
-              <button onClick={promptInstall} className="btn btn-ghost btn-sm gap-1.5 text-primary hidden sm:flex">
-                <Download className="w-4 h-4" /> Install App
+              <button type="button" onClick={promptInstall} className="btn btn-ghost btn-sm hidden text-saddle sm:flex">
+                <Download className="h-4 w-4" aria-hidden="true" /> Install
               </button>
             )}
-            <ThemeSwitcher compact />
             {isAuthenticated ? (
-              <button onClick={handleGetStarted} className="btn btn-primary btn-sm gap-1">
-                Dashboard <ChevronRight className="w-4 h-4" />
+              <button type="button" onClick={handleGetStarted} className="btn btn-primary btn-sm">
+                Dashboard <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : (
               <>
-                <button onClick={() => navigate('/login')} className="btn btn-ghost btn-sm hidden sm:flex">Login</button>
-                <button onClick={() => navigate('/login')} className="btn btn-primary btn-sm">Get Started</button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/login')}
+                  className="btn btn-ghost btn-sm hidden text-saddle sm:flex"
+                >
+                  Sign in
+                </button>
+                <button type="button" onClick={() => navigate('/login')} className="btn btn-primary btn-sm">
+                  Get started
+                </button>
               </>
             )}
           </div>
         </div>
       </nav>
 
-      {/* Mobile Install Banner — shown below navbar on small screens */}
-      {canInstall && (
-        <div className="fixed top-16 left-0 right-0 z-40 sm:hidden bg-primary/10 border-b border-primary/20 px-4 py-2 flex items-center justify-between">
-          <span className="text-xs font-medium text-primary">Install PBI AgriInsure for quick access</span>
-          <button onClick={promptInstall} className="btn btn-primary btn-xs gap-1">
-            <Download className="w-3 h-3" /> Install
-          </button>
-        </div>
-      )}
-
-      {/* ── Hero Section ── */}
-      <section className="pt-20 sm:pt-24 relative overflow-hidden">
-        <div className="absolute inset-0">
-          <img src="/images/farmland-hero.jpeg" alt="Indian farmland" className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/60 to-black/40" />
-        </div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-32 lg:py-40">
-          <div className="max-w-2xl">
-            <div className="flex items-center gap-2 mb-6">
-              <img src="/images/government-emblem.png" alt="Government Emblem" className="w-8 h-8 object-contain opacity-90" />
-              <span className="badge badge-primary gap-2 text-xs font-semibold">
-                <CheckCircle2 className="w-3 h-3" /> Government of India Initiative
-              </span>
-            </div>
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-6 text-white">
-              Protect Your{' '}
-              <span className="text-primary">Crops</span>{' '}
-              with Smart Insurance
-            </h1>
-            <p className="text-lg sm:text-xl text-white/70 mb-8 max-w-xl">
-              File crop damage claims instantly using your phone camera.
-              AI-powered verification ensures fast, fair, and transparent payouts for Indian farmers.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button onClick={handleGetStarted} className="btn btn-primary btn-lg gap-2 shadow-xl">
-                <Sprout className="w-5 h-5" /> Get Started — It's Free
-              </button>
-              <a href="#how-it-works" className="btn btn-outline btn-lg gap-2 text-white border-white/30 hover:bg-white/10 hover:border-white/50">
-                Learn How It Works
-              </a>
-            </div>
-            <div className="mt-8 flex items-center gap-6 text-sm text-white/60">
-              {['No Paperwork', 'AI Verified', 'Fast Payouts'].map((t) => (
-                <span key={t} className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-green-400" /> {t}
+      <main id="main">
+        {/* Hero — the dark charcoal-olive panel rather than a black scrim over
+            the photograph, so the type sits on a deliberate surface. */}
+        <section className="relative overflow-hidden bg-charcoal-olive pt-16">
+          <img
+            src="/images/farmland-hero.jpeg"
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-25"
+          />
+          <div className="relative mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8 lg:py-32">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-3">
+                <img src="/images/government-emblem.png" alt="" className="h-8 w-8 shrink-0 object-contain" />
+                <span className="flex items-center gap-1.5 rounded-md border border-loam/40 px-2.5 py-1 text-caption uppercase tracking-[0.12em] text-loam">
+                  <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Government of India initiative
                 </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Stats ── */}
-      <section className="py-12 bg-base-100 border-b border-base-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="stats stats-vertical sm:stats-horizontal shadow w-full">
-            {[
-              { value: '10,000+', label: 'Farmers Registered', icon: Users },
-              { value: '80%', label: 'Faster Processing', icon: Zap },
-              { value: '₹50Cr+', label: 'Claims Processed', icon: Banknote },
-              { value: '28', label: 'States Covered', icon: Globe },
-            ].map((s) => (
-              <div key={s.label} className="stat">
-                <div className="stat-figure text-primary"><s.icon className="w-6 h-6" /></div>
-                <div className="stat-value text-primary">{s.value}</div>
-                <div className="stat-desc">{s.label}</div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* ── What Is Crop Insurance ── */}
-      <section className="py-16 sm:py-24 bg-base-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-6">
-                What Is <span className="text-primary">Crop Insurance</span>?
-              </h2>
-              <p className="text-lg text-base-content/70 leading-relaxed mb-6">
-                Crop insurance protects farmers against financial loss due to natural calamities,
-                pest attacks, and diseases. Under schemes like <strong>PMFBY</strong> and <strong>WBCIS</strong>,
-                farmers pay a small premium and receive compensation when their crops are damaged.
+              <h1 className="mt-6 text-heading text-parchment sm:text-heading-lg">
+                Protect your crops with insurance that answers in minutes
+              </h1>
+              <p className="mt-5 max-w-xl text-body-lg text-loam">
+                File crop damage claims from your phone camera. AI verification means fast, fair and transparent
+                payouts for Indian farmers.
               </p>
-              <div className="space-y-4">
-                {[
-                  { icon: ShieldCheck, title: 'Premium Protection', desc: 'Low premiums backed by government subsidy for all major crops across India.' },
-                  { icon: Camera, title: 'Photo Proof', desc: 'No more waiting for inspectors. Submit GPS-tagged photos from your phone.' },
-                  { icon: Banknote, title: 'Direct Payouts', desc: 'Approved claims are paid directly to your bank account within days.' },
-                ].map((item) => (
-                  <div key={item.title} className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                      <item.icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-base-content">{item.title}</h3>
-                      <p className="text-sm text-base-content/60">{item.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="relative">
-              <img src="/images/frontFarmer.png" alt="Indian farmer using the insurance platform" className="w-full rounded-3xl shadow-2xl object-cover max-h-[500px]" />
-              <div className="absolute -bottom-4 -left-4 bg-base-100 rounded-xl shadow-lg p-4 border border-base-300">
-                <p className="text-2xl font-bold text-primary">95%</p>
-                <p className="text-xs text-base-content/50">Fraud Detection</p>
-              </div>
-              <div className="absolute -top-4 -right-4 bg-base-100 rounded-xl shadow-lg p-4 border border-base-300">
-                <p className="text-2xl font-bold text-accent">24/7</p>
-                <p className="text-xs text-base-content/50">Claim Filing</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      {/* ── How It Works ── */}
-      <section id="how-it-works" className="py-16 sm:py-24 bg-base-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-4">
-              How the <span className="text-primary">Claim Process</span> Works
-            </h2>
-            <p className="text-lg text-base-content/60 max-w-2xl mx-auto">
-              Three simple steps to file your crop damage claim and receive your insurance payout
-            </p>
-          </div>
-          <ul className="steps steps-vertical lg:steps-horizontal w-full mb-12">
-            <li className="step step-primary">Capture Photos</li>
-            <li className="step step-primary">AI Verification</li>
-            <li className="step step-primary">Receive Payout</li>
-          </ul>
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              { step: '01', img: '/images/gps-capture-icon.jpg', title: 'Capture Damage Photos', desc: 'Take GPS-tagged photos of your damaged crops from different angles using your phone camera.' },
-              { step: '02', img: '/images/ai-verify-icon.jpg', title: 'AI Verification', desc: 'Our AI analyzes your photos to verify damage authenticity, location, and severity — no manual inspectors needed.' },
-              { step: '03', img: '/images/claim-approval-icon.jpg', title: 'Receive Payout', desc: 'Approved claims receive direct payout to your bank account. Track everything transparently in your dashboard.' },
-            ].map((item) => (
-              <div key={item.step} className="card bg-base-100 shadow-md border border-base-300 hover:shadow-xl transition-shadow">
-                <figure className="h-40 overflow-hidden">
-                  <img src={item.img} alt={item.title} className="w-full h-full object-cover" />
-                </figure>
-                <div className="card-body p-5">
-                  <div className="badge badge-primary badge-sm mb-1">{item.step}</div>
-                  <h3 className="card-title text-base">{item.title}</h3>
-                  <p className="text-base-content/60 text-sm">{item.desc}</p>
-                </div>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <button type="button" onClick={handleGetStarted} className="btn btn-primary btn-lg">
+                  <Sprout className="h-5 w-5" aria-hidden="true" /> Get started — it's free
+                </button>
+                <a href="#how-it-works" className="btn btn-lg border-loam/50 bg-transparent text-parchment hover:bg-parchment/10">
+                  See how it works
+                </a>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* ── AI Technology ── */}
-      <section className="py-16 sm:py-24 bg-base-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="order-2 lg:order-1">
-              <img src="/images/ai-fraud-detection-layers.png" alt="AI fraud detection layers" className="w-full rounded-2xl shadow-xl" />
-            </div>
-            <div className="order-1 lg:order-2">
-              <span className="badge badge-secondary badge-outline gap-1 mb-4">
-                <Zap className="w-3 h-3" /> AI-Powered Technology
-              </span>
-              <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-6">
-                Multi-Layer <span className="text-primary">Fraud Detection</span>
-              </h2>
-              <p className="text-base-content/60 leading-relaxed mb-6">
-                Our platform uses advanced AI and machine learning to ensure only genuine claims are processed,
-                protecting both farmers and insurers.
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { icon: MapPin, label: 'GPS Verification', desc: 'Location authenticity check' },
-                  { icon: Camera, label: 'Image Analysis', desc: 'AI-powered damage assessment' },
-                  { icon: Eye, label: 'EXIF Validation', desc: 'Metadata integrity check' },
-                  { icon: ShieldCheck, label: 'Cross-Reference', desc: 'Weather & satellite data' },
-                ].map((item) => (
-                  <div key={item.label} className="bg-base-100 rounded-lg p-4 shadow-sm">
-                    <item.icon className="w-5 h-5 text-primary mb-2" />
-                    <p className="font-semibold text-sm text-base-content">{item.label}</p>
-                    <p className="text-xs text-base-content/50">{item.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Traditional vs Hybrid Model ── */}
-      <section className="py-16 sm:py-24 bg-base-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-4">
-              Why <span className="text-primary">PBI AgriInsure</span>?
-            </h2>
-            <p className="text-lg text-base-content/60 max-w-2xl mx-auto">
-              Traditional claim processing takes weeks. Our AI-powered hybrid model does it in minutes.
-            </p>
-          </div>
-          <div className="flex justify-center">
-            <img src="/images/traditional-vs-hybrid-model.png" alt="Traditional vs Hybrid Insurance Model" className="w-full max-w-4xl rounded-2xl shadow-xl border border-base-300" />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Benefits ── */}
-      <section className="py-16 sm:py-24 bg-base-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-4">
-              Built For <span className="text-primary">Indian Farmers</span>
-            </h2>
-            <p className="text-lg text-base-content/60 max-w-2xl mx-auto">
-              A platform designed with simplicity, transparency, and farmer welfare in mind
-            </p>
-          </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              { icon: Smartphone, title: 'Mobile First', desc: 'Use your smartphone to file claims. No computers or internet cafes needed.' },
-              { icon: ShieldCheck, title: 'Fraud Protection', desc: 'GPS tagging, EXIF analysis, and AI ensure only genuine claims are processed.' },
-              { icon: Zap, title: 'Fast Processing', desc: 'AI-powered analysis means claims are processed in minutes, not weeks.' },
-              { icon: Eye, title: 'Full Transparency', desc: 'Track every step of your claim. See AI analysis, review status, and payout details.' },
-              { icon: Globe, title: 'Multi-Language Ready', desc: 'Designed for farmers across all 28 states of India with simple, clear interface.' },
-              { icon: Building2, title: 'Government Aligned', desc: 'Supports PMFBY, WBCIS, and other government crop insurance schemes.' },
-            ].map((item) => (
-              <div key={item.title} className="card bg-base-100 shadow-sm hover:shadow-md transition-shadow">
-                <div className="card-body p-4 flex-row items-start gap-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center text-primary shrink-0">
-                    <item.icon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-sm text-base-content mb-0.5">{item.title}</h3>
-                    <p className="text-xs text-base-content/60 leading-relaxed">{item.desc}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Dashboard Preview ── */}
-      <section className="py-16 sm:py-24 bg-base-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <span className="badge badge-accent badge-outline gap-1 mb-4">
-                <TrendingUp className="w-3 h-3" /> Smart Dashboard
-              </span>
-              <h2 className="text-3xl sm:text-4xl font-bold text-base-content mb-6">
-                Track Everything in <span className="text-primary">Real Time</span>
-              </h2>
-              <p className="text-base-content/60 leading-relaxed mb-6">
-                Monitor your claims, policies, and payouts from a single intuitive dashboard. Get notified
-                at every step — from submission to approval to payout.
-              </p>
-              <ul className="space-y-3">
-                {[
-                  'Real-time claim status tracking',
-                  'AI confidence scores & damage reports',
-                  'Download PDF analysis reports',
-                  'Instant notifications on updates',
-                ].map((item) => (
-                  <li key={item} className="flex items-center gap-3 text-base-content/70">
-                    <CheckCircle2 className="w-5 h-5 text-success shrink-0" />
-                    <span>{item}</span>
+              <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2">
+                {['No paperwork', 'AI verified', 'Fast payouts'].map((t) => (
+                  <li key={t} className="flex items-center gap-2 text-body text-loam">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-honey-amber" aria-hidden="true" /> {t}
                   </li>
                 ))}
               </ul>
-              <button onClick={handleGetStarted} className="btn btn-primary mt-8 gap-2">
-                <Leaf className="w-4 h-4" /> Try It Now
-              </button>
-            </div>
-            <div className="relative">
-              <img src="/images/dashboard-preview.png" alt="Dashboard preview" className="w-full rounded-2xl shadow-2xl border border-base-300" />
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── Our Team ── */}
-      <section className="py-12 sm:py-16 bg-base-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-2xl sm:text-3xl font-bold text-base-content mb-3">
-            Meet Our <span className="text-primary">Team</span>
-          </h2>
-          <p className="text-base text-base-content/60 mb-8 max-w-2xl mx-auto">
-            Passionate engineers building technology for India's agricultural future
-          </p>
-          <div className="grid sm:grid-cols-3 gap-5">
+        {/* This strip previously carried invented counts — "10,000+ farmers
+            registered", "₹50Cr+ claims processed" — as fact on a government
+            page. It now states what the platform does, which is checkable. */}
+        <section className="border-b border-bone bg-pure-white">
+          <dl className="mx-auto grid max-w-7xl grid-cols-2 divide-bone px-4 sm:grid-cols-4 sm:divide-x sm:px-6 lg:px-8">
             {[
-              { name: 'Nikhil', role: 'Lead Developer', img: '/images/nikhil.png' },
-              { name: 'Gayatri', role: 'AI & Research', img: '/images/gayatri.jpg' },
-              { name: 'Umair', role: 'Backend Engineer', img: '/images/umair.jpg' },
-            ].map((member) => (
-              <div key={member.name} className="card bg-base-100 shadow-md hover:shadow-lg transition-shadow">
-                <figure className="px-5 pt-5">
-                  <div className="w-24 h-24 rounded-full overflow-hidden mx-auto ring-4 ring-primary/20">
-                    <img src={member.img} alt={member.name} className="w-full h-full object-cover" />
-                  </div>
-                </figure>
-                <div className="card-body items-center text-center p-4 pt-3">
-                  <h3 className="card-title text-sm">{member.name}</h3>
-                  <p className="text-xs text-base-content/50">{member.role}</p>
-                  <div className="flex gap-1 mt-0.5">
-                    <Award className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-xs text-primary font-medium">Core Team</span>
-                  </div>
-                </div>
+              { value: `${INDIAN_STATES.length}`, label: 'States covered' },
+              { value: '5', label: 'Photos per claim' },
+              { value: '4', label: 'Fraud checks per photo' },
+              { value: '24/7', label: 'Claim filing' },
+            ].map((s) => (
+              <div key={s.label} className="px-2 py-6 text-center sm:px-6">
+                <dt className="sr-only">{s.label}</dt>
+                <dd>
+                  <span className="block text-heading-sm text-ink">{s.value}</span>
+                  <span className="mt-0.5 block text-body text-bark">{s.label}</span>
+                </dd>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
+          </dl>
+        </section>
 
-      {/* ── CTA ── */}
-      <section className="py-16 sm:py-24 bg-primary text-primary-content relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-10 left-10 w-64 h-64 bg-white rounded-full blur-3xl" />
-          <div className="absolute bottom-10 right-10 w-80 h-80 bg-white rounded-full blur-3xl" />
-        </div>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative">
-          <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to Protect Your Harvest?</h2>
-          <p className="text-lg opacity-80 mb-8 max-w-2xl mx-auto">
-            Join thousands of farmers already using PBI AgriInsure to secure their crops.
-            Filing a claim takes less than 5 minutes.
-          </p>
-          <button onClick={handleGetStarted} className="btn btn-lg bg-base-100 text-primary hover:bg-base-200 gap-2 shadow-xl">
-            Start Filing Your Claim <ArrowRight className="w-5 h-5" />
-          </button>
-        </div>
-      </section>
-
-      {/* ── Footer ── */}
-      <footer className="bg-neutral text-neutral-content">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid md:grid-cols-3 gap-8">
+        <section className="bg-parchment py-16 sm:py-24">
+          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
             <div>
-              <div className="flex items-center gap-3 mb-4">
-                <img src="/images/government-emblem.png" alt="Emblem" className="w-10 h-10 object-contain opacity-80" />
-                <div>
-                  <h3 className="font-bold text-lg">PBI AgriInsure</h3>
-                  <p className="text-xs opacity-60">Crop Insurance Platform</p>
-                </div>
-              </div>
-              <p className="text-sm opacity-60 leading-relaxed">
-                Photo & Video-Based Insurance Assessment Platform. Empowering Indian farmers with
-                AI-powered crop damage verification.
+              <Eyebrow>The basics</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">What crop insurance covers</h2>
+              <p className="mt-4 text-body-lg text-saddle">
+                Crop insurance protects you against loss from natural calamity, pest attack and disease. Under
+                schemes such as <strong className="font-medium">PMFBY</strong> and{' '}
+                <strong className="font-medium">WBCIS</strong>, you pay a small premium and receive compensation when
+                your crop is damaged.
+              </p>
+              <ul className="mt-8 space-y-5">
+                {PROMISES.map((item) => (
+                  <li key={item.title} className="flex items-start gap-4">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-honey-amber/25">
+                      <item.Icon className="h-5 w-5 text-saddle" aria-hidden="true" />
+                    </span>
+                    <span>
+                      <span className="block text-body-lg font-medium text-ink">{item.title}</span>
+                      <span className="block text-body text-bark">{item.desc}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <img
+                src="/images/frontFarmer.png"
+                alt="An Indian farmer filing a claim on the platform"
+                className="w-full rounded-lg border border-bone object-cover"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section id="how-it-works" className="scroll-mt-20 border-y border-bone bg-pure-white py-16 sm:py-24">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
+              <Eyebrow>How it works</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Three steps to a settled claim</h2>
+              <p className="mt-3 text-body-lg text-bark">
+                From standing in your field to money in your account, without an inspector's visit.
               </p>
             </div>
-            <div>
-              <h4 className="font-semibold mb-4">Quick Links</h4>
-              <ul className="space-y-2 text-sm opacity-70">
-                <li><a href="#how-it-works" className="link link-hover">How It Works</a></li>
-                <li><button onClick={() => navigate('/login')} className="link link-hover">File a Claim</button></li>
-                <li><button onClick={() => navigate('/login')} className="link link-hover">Track Claim</button></li>
-                <li><button onClick={() => navigate('/login')} className="link link-hover">Login / Register</button></li>
-              </ul>
+
+            <ol className="mt-12 grid gap-4 md:grid-cols-3">
+              {HOW_IT_WORKS.map((item) => (
+                <li
+                  key={item.step}
+                  className="flex flex-col rounded-lg border border-bone bg-parchment p-6"
+                >
+                  <div className="flex items-baseline justify-between gap-3 border-b border-bone pb-4">
+                    <span className="text-heading text-honey-amber">{item.step}</span>
+                    <item.Icon className="h-6 w-6 shrink-0 text-saddle" aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-subheading text-ink">{item.title}</h3>
+                  <p className="mt-2 flex-1 text-body text-bark">{item.desc}</p>
+                  <p className="label-micro mt-4">{item.detail}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {/* This section used to sit beside an AI-generated poster whose own
+            caption read "Agricultural Insurance Technology" and which advertised
+            satellite monitoring and a blockchain network — neither of which this
+            platform has. The four checks it claimed to illustrate are real and
+            are listed here, so the illustration was removed rather than
+            relabelled. */}
+        <section className="bg-parchment py-16 sm:py-24">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
+              <Eyebrow>Verification</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Four checks on every photo</h2>
+              <p className="mt-4 text-body-lg text-saddle">
+                Each submitted photo passes independent checks before an assessment is produced, so genuine claims
+                move quickly and the rest are caught.
+              </p>
             </div>
-            <div>
-              <h4 className="font-semibold mb-4">Contact</h4>
-              <ul className="space-y-3 text-sm opacity-70">
-                <li className="flex items-center gap-2"><Phone className="w-4 h-4" /> Helpline: 1800-180-1551</li>
-                <li className="flex items-center gap-2"><Mail className="w-4 h-4" /> support@pbi-agriinsure.in</li>
-                <li className="flex items-center gap-2"><Building2 className="w-4 h-4" /> Ministry of Agriculture, New Delhi</li>
-              </ul>
+            <ol className="mt-10 grid gap-px overflow-hidden rounded-lg border border-bone bg-bone sm:grid-cols-2 lg:grid-cols-4">
+              {FRAUD_LAYERS.map((item, i) => (
+                <li key={item.label} className="flex flex-col bg-pure-white p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <item.Icon className="h-5 w-5 shrink-0 text-saddle" aria-hidden="true" />
+                    <span className="label-micro">Check {i + 1}</span>
+                  </div>
+                  <p className="mt-4 text-body-lg font-medium text-ink">{item.label}</p>
+                  <p className="mt-1 text-body text-bark">{item.desc}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {/* The "comparison" here was the same AI poster as the section above,
+            captioned differently. An actual comparison is five rows of text. */}
+        <section className="border-y border-bone bg-pure-white py-16 sm:py-24">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
+              <Eyebrow>Why it is faster</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">What changes for you</h2>
+              <p className="mt-3 text-body-lg text-bark">
+                Traditional claim processing waits on a field inspector. Photographs are assessed first, and the
+                visit is reserved for the cases that genuinely need one.
+              </p>
+            </div>
+
+            <div className="mt-10 overflow-hidden rounded-lg border border-bone">
+              <div className="hidden grid-cols-[1fr_1fr_1fr] gap-px bg-bone sm:grid">
+                <p className="label-micro bg-parchment px-5 py-3">Stage</p>
+                <p className="label-micro bg-parchment px-5 py-3">Traditional</p>
+                <p className="label-micro bg-honey-amber/20 px-5 py-3 text-saddle">With PBI AgriInsure</p>
+              </div>
+
+              <dl className="grid gap-px bg-bone">
+                {COMPARISON.map((row) => (
+                  <div key={row.stage} className="grid gap-px bg-bone sm:grid-cols-[1fr_1fr_1fr]">
+                    <dt className="bg-parchment px-5 py-4 text-body font-medium text-ink">{row.stage}</dt>
+                    <dd className="bg-pure-white px-5 py-4 text-body text-bark">
+                      <span className="label-micro mb-1 block sm:hidden">Traditional</span>
+                      {row.before}
+                    </dd>
+                    <dd className="bg-honey-amber/10 px-5 py-4 text-body text-ink">
+                      <span className="label-micro mb-1 block sm:hidden">With PBI AgriInsure</span>
+                      {row.after}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           </div>
-          <div className="border-t border-white/10 mt-8 pt-8 text-center text-sm opacity-50">
-            <p>&copy; {new Date().getFullYear()} PBI AgriInsure. Ministry of Agriculture & Farmers Welfare, Government of India.</p>
+        </section>
+
+        <section className="bg-parchment py-16 sm:py-24">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl">
+              <Eyebrow>Built for farmers</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Designed around how you actually work</h2>
+            </div>
+            <ul className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {BENEFITS.map((item) => (
+                <li key={item.title} className="flex items-start gap-3 rounded-lg border border-bone bg-pure-white p-5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-honey-amber/25">
+                    <item.Icon className="h-5 w-5 text-saddle" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-body-lg font-medium text-ink">{item.title}</span>
+                    <span className="block text-body text-bark">{item.desc}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
+        </section>
+
+        <section className="border-y border-bone bg-pure-white py-16 sm:py-24">
+          <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
+            <div>
+              <Eyebrow>Your dashboard</Eyebrow>
+              <h2 className="mt-2 text-heading-sm text-ink sm:text-heading">Follow your claim the whole way</h2>
+              <p className="mt-4 text-body-lg text-saddle">
+                Every claim, policy and payout in one place, with the assessment shown in full rather than summarised
+                into a yes or no.
+              </p>
+              <ul className="mt-6 space-y-3">
+                {DASHBOARD_POINTS.map((item) => (
+                  <li key={item} className="flex items-center gap-3 text-body text-saddle">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-sage" aria-hidden="true" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={handleGetStarted} className="btn btn-primary mt-8">
+                <Leaf className="h-4 w-4" aria-hidden="true" /> Try it now
+              </button>
+            </div>
+            {/* The screenshot that sat here was of the pre-redesign dashboard —
+                saturated blue buttons, drop shadows, the lot — so it advertised
+                a product that no longer exists. A small honest representation
+                built from the real design system replaces it. */}
+            <div className="rounded-lg border border-bone bg-parchment p-5">
+              <p className="label-micro">Claim CLM-M8K2-A7X9Q</p>
+              <p className="mt-1 text-subheading text-ink">Wheat · 5.5 acres · Punjab</p>
+
+              <dl className="mt-5 grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Status', value: 'Under review' },
+                  { label: 'Damage assessed', value: '41.2%' },
+                  { label: 'AI confidence', value: '62.0%' },
+                  { label: 'Suggested payout', value: '₹48,500' },
+                ].map((d) => (
+                  <div key={d.label} className="rounded-md border border-bone bg-pure-white p-3">
+                    <dt className="label-micro">{d.label}</dt>
+                    <dd className="mt-0.5 text-body-lg font-medium text-ink">{d.value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="mt-5 border-t border-bone pt-4">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="label-micro">Evidence</span>
+                  <span className="text-body text-bark">5 of 5 photos</span>
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-md bg-bone">
+                  <div className="h-full w-full rounded-md bg-honey-amber" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-parchment py-16">
+          <div className="mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
+            <Eyebrow>The team</Eyebrow>
+            <h2 className="mt-2 text-heading-sm text-ink">Who built this</h2>
+            <ul className="mt-10 grid gap-4 sm:grid-cols-3">
+              {TEAM.map((member) => (
+                <li key={member.name} className="rounded-lg border border-bone bg-pure-white p-5">
+                  <img
+                    src={member.img}
+                    alt=""
+                    className="mx-auto h-24 w-24 rounded-full border border-bone object-cover"
+                  />
+                  <p className="mt-4 text-body-lg font-medium text-ink">{member.name}</p>
+                  <p className="text-body text-bark">{member.role}</p>
+                  <p className="mt-2 flex items-center justify-center gap-1.5 text-caption text-saddle">
+                    <Award className="h-3.5 w-3.5" aria-hidden="true" /> Core team
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="bg-charcoal-olive py-16 sm:py-24">
+          <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+            <h2 className="text-heading-sm text-parchment sm:text-heading">Ready to protect your harvest?</h2>
+            <p className="mx-auto mt-4 max-w-xl text-body-lg text-loam">
+              Filing a claim takes about five minutes, and you can do it standing in your field.
+            </p>
+            <button type="button" onClick={handleGetStarted} className="btn btn-primary btn-lg mt-8">
+              Start your claim <ArrowRight className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-bone bg-pure-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-3 lg:px-8">
+          <div>
+            <div className="flex items-center gap-3">
+              <img src="/images/government-emblem.png" alt="" className="h-10 w-10 shrink-0 object-contain" />
+              <div>
+                <p className="text-body-lg font-medium text-ink">{APP_NAME}</p>
+                <p className="text-caption text-bark">{APP_TAGLINE}</p>
+              </div>
+            </div>
+            <p className="mt-4 text-body text-bark">
+              Photo and video based insurance assessment, giving Indian farmers AI-verified crop damage claims.
+            </p>
+          </div>
+
+          <nav aria-label="Footer">
+            <h2 className="eyebrow">Quick links</h2>
+            <ul className="mt-3 space-y-2">
+              <li>
+                <a href="#how-it-works" className="text-body text-saddle underline-offset-4 hover:underline">
+                  How it works
+                </a>
+              </li>
+              {['File a claim', 'Track a claim', 'Sign in'].map((label) => (
+                <li key={label}>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login')}
+                    className="text-body text-saddle underline-offset-4 hover:underline"
+                  >
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <div>
+            <h2 className="eyebrow">Contact</h2>
+            <ul className="mt-3 space-y-2.5 text-body text-saddle">
+              <li className="flex items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+                <a href={`tel:${SUPPORT.helpline.replace(/\D/g, '')}`} className="underline-offset-4 hover:underline">
+                  {SUPPORT.helpline}
+                </a>
+                <span className="text-caption text-bark">{SUPPORT.helplineNote}</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Mail className="h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+                <a href={`mailto:${SUPPORT.email}`} className="truncate underline-offset-4 hover:underline">
+                  {SUPPORT.email}
+                </a>
+              </li>
+              <li className="flex items-start gap-2">
+                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+                {SUPPORT.office}
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="border-t border-bone">
+          <p className="mx-auto max-w-7xl px-4 py-6 text-center text-caption text-bark sm:px-6 lg:px-8">
+            © {new Date().getFullYear()} {APP_NAME}. Ministry of Agriculture &amp; Farmers Welfare, Government of
+            India.
+          </p>
         </div>
       </footer>
     </div>
   );
-};
-
-export default Landing;
+}

@@ -1,176 +1,238 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../utils/api';
-import { ShieldCheck, Phone, KeyRound, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
+import { TextField } from '../../components/ui/Field';
+import { ShieldCheck, Phone, KeyRound, ArrowLeft, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+
+const RESEND_SECONDS = 30;
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, isAuthenticated, user } = useAuth();
+  const { login } = useAuth();
   const [step, setStep] = useState('phone');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [resendIn, setResendIn] = useState(0);
 
-  if (isAuthenticated) {
-    navigate(user?.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
-    return null;
-  }
+  // A farmer who never receives the SMS previously had no way forward at all:
+  // there was no resend, and no indication of when one might be possible.
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const timer = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
 
-  const handleSendOtp = async (e) => {
-    e.preventDefault();
-    if (!/^[6-9]\d{9}$/.test(phone)) return setError('Enter a valid 10-digit Indian mobile number');
+  const sendOtp = async ({ resend = false } = {}) => {
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      setError('Enter a valid 10-digit Indian mobile number');
+      return;
+    }
     try {
-      setLoading(true); setError('');
+      setLoading(true);
+      setError('');
       await api.post('/api/auth/send-otp', { phoneNumber: phone });
       setStep('otp');
+      setResendIn(RESEND_SECONDS);
+      setNotice(resend ? 'A new code is on its way.' : '');
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to send OTP');
-    } finally { setLoading(false); }
+      setError(err.response?.data?.error || 'Could not send the code. Check your number and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendOtp = (e) => {
+    e.preventDefault();
+    sendOtp();
   };
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
-    if (!otp.trim()) return setError('Enter the OTP');
+    if (!otp.trim()) {
+      setError('Enter the code we sent you');
+      return;
+    }
     try {
-      setLoading(true); setError('');
+      setLoading(true);
+      setError('');
       const { data } = await api.post('/api/auth/verify-otp', { phoneNumber: phone, otp });
       if (data.success && data.token) {
         login(data.token, data.user);
         navigate(data.user?.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
       } else {
-        setError('Invalid OTP');
+        setError('That code was not correct. Check it and try again.');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Verification failed');
-    } finally { setLoading(false); }
+      setError(err.response?.data?.error || 'Verification failed. Request a new code and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const promises = ['No paperwork required', 'AI-verified claims in minutes', 'Direct bank payouts'];
+
   return (
-    <div className="min-h-screen flex bg-base-200">
-      {/* Left panel — hero image (desktop only) */}
-      <div className="hidden lg:flex lg:w-1/2 relative">
-        <img src="/images/farmland-hero.jpeg" alt="Indian farmland" className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-black/70" />
-        <div className="absolute inset-0 flex flex-col justify-center px-12">
-          <div className="flex items-center gap-3 mb-6">
-            <img src="/images/government-emblem.png" alt="Emblem" className="w-12 h-12 object-contain opacity-90" />
+    <div className="flex min-h-screen bg-parchment">
+      {/* Inverted panel — the theme's high-emphasis surface, used here to hold
+          the brand promise without competing with the form. */}
+      <aside className="relative hidden w-1/2 flex-col justify-center bg-charcoal-olive px-12 lg:flex">
+        <img
+          src="/images/farmland-hero.jpeg"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-20"
+        />
+        <div className="relative">
+          <div className="mb-8 flex items-center gap-3">
+            <img src="/images/government-emblem.png" alt="" className="h-11 w-11 object-contain" />
             <div>
-              <h1 className="text-2xl font-bold text-white">PBI AgriInsure</h1>
-              <p className="text-sm text-white/60">Crop Insurance Platform</p>
+              <p className="text-body-lg font-medium text-parchment">PBI AgriInsure</p>
+              <p className="eyebrow text-loam">Crop Insurance Platform</p>
             </div>
           </div>
-          <h2 className="text-3xl font-bold text-white leading-snug mb-4">
-            Protect Your Harvest with<br />AI-Powered Insurance
-          </h2>
-          <p className="text-white/60 mb-8 max-w-md">
-            File crop damage claims instantly using your phone camera. Fast, fair, and transparent payouts for Indian farmers.
+          <h1 className="max-w-md text-heading text-parchment">Protect your harvest with AI-verified insurance</h1>
+          <p className="mt-4 max-w-md text-body-lg text-loam">
+            File crop damage claims from your phone camera. Fast, fair and transparent payouts for Indian farmers.
           </p>
-          <div className="space-y-3">
-            {['No paperwork required', 'AI-verified claims in minutes', 'Direct bank payouts'].map(t => (
-              <div key={t} className="flex items-center gap-3 text-white/80">
-                <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
-                <span className="text-sm">{t}</span>
-              </div>
+          <ul className="mt-8 space-y-3">
+            {promises.map((t) => (
+              <li key={t} className="flex items-center gap-3 text-body text-parchment">
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-honey-amber" aria-hidden="true" />
+                {t}
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
-      </div>
+      </aside>
 
-      {/* Right panel — login form */}
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-md">
-          <div className="card-body">
-            {/* Header */}
-            <div className="text-center mb-4">
-              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <img
-                  src="/images/government-emblem.png"
-                  alt="PBI AgriInsure"
-                  className="w-10 h-10 object-contain"
-                  onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                />
-                <div className="hidden items-center justify-center">
-                  <ShieldCheck className="w-8 h-8 text-primary" />
-                </div>
-              </div>
-              <h2 className="text-2xl font-bold text-base-content">
-                {step === 'phone' ? 'Welcome Back' : 'Verify OTP'}
-              </h2>
-              <p className="text-sm text-base-content/60 mt-1">
-                {step === 'phone'
-                  ? 'Sign in to your PBI AgriInsure account'
-                  : `We sent a code to +91 ${phone}`}
-              </p>
+      <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-8">
+        <div className="w-full max-w-md rounded-lg border border-bone bg-pure-white p-6 sm:p-8">
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-honey-amber/25">
+              <img
+                src="/images/government-emblem.png"
+                alt=""
+                className="h-9 w-9 object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
             </div>
+            <p className="eyebrow mt-5">{step === 'phone' ? 'Sign in' : 'Verify'}</p>
+            <h1 className="mt-1 text-heading-sm text-ink">
+              {step === 'phone' ? 'Welcome back' : 'Enter your code'}
+            </h1>
+            <p className="mt-1 text-body text-bark">
+              {step === 'phone'
+                ? 'We will text a one-time code to your mobile number.'
+                : `Sent to +91 ${phone}`}
+            </p>
+          </div>
 
-            {/* Error */}
-            {error && (
-              <div className="alert alert-error text-sm">
-                <span>{error}</span>
+          {error && (
+            <p
+              role="alert"
+              className="mt-5 flex items-start gap-2 rounded-md border border-saddle bg-saddle/10 px-3 py-2.5 text-body text-saddle"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {error}
+            </p>
+          )}
+          {!error && notice && (
+            <p role="status" className="mt-5 rounded-md border border-sage bg-sage/10 px-3 py-2.5 text-body text-deep-olive">
+              {notice}
+            </p>
+          )}
+
+          {step === 'phone' ? (
+            <form onSubmit={handleSendOtp} className="mt-6 space-y-5">
+              <TextField
+                label="Mobile number"
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                icon={Phone}
+                prefix="+91"
+                placeholder="10-digit number"
+                value={phone}
+                maxLength={10}
+                autoFocus
+                hint="The number registered with your insurance policy."
+                onChange={(v) => {
+                  setPhone(v.replace(/\D/g, '').slice(0, 10));
+                  setError('');
+                }}
+              />
+              <button type="submit" disabled={loading || phone.length !== 10} className="btn btn-primary w-full">
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <KeyRound className="h-4 w-4" aria-hidden="true" />
+                )}
+                {loading ? 'Sending code…' : 'Send code'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOtp} className="mt-6 space-y-5">
+              <TextField
+                label="One-time code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                icon={KeyRound}
+                placeholder="6-digit code"
+                value={otp}
+                maxLength={6}
+                autoFocus
+                onChange={(v) => {
+                  setOtp(v.replace(/\D/g, '').slice(0, 6));
+                  setError('');
+                }}
+              />
+              <button type="submit" disabled={loading || !otp.trim()} className="btn btn-primary w-full">
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                )}
+                {loading ? 'Verifying…' : 'Verify and sign in'}
+              </button>
+
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('phone');
+                    setOtp('');
+                    setError('');
+                    setNotice('');
+                  }}
+                  className="btn btn-ghost btn-sm text-saddle"
+                >
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Change number
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sendOtp({ resend: true })}
+                  disabled={resendIn > 0 || loading}
+                  className="btn btn-ghost btn-sm text-saddle"
+                >
+                  {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+                </button>
               </div>
-            )}
+            </form>
+          )}
 
-            {/* Phone step */}
-            {step === 'phone' ? (
-              <form onSubmit={handleSendOtp} className="space-y-4">
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Mobile Number</span></label>
-                  <label className="input input-bordered flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-base-content/40" />
-                    <span className="text-base-content/50">+91</span>
-                    <input
-                      type="tel"
-                      placeholder="Enter 10-digit number"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="grow"
-                      maxLength={10}
-                      autoFocus
-                    />
-                  </label>
-                </div>
-                <button type="submit" disabled={loading || phone.length !== 10} className="btn btn-primary btn-block gap-2">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                  {loading ? 'Sending...' : 'Send OTP'}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-4">
-                <div className="form-control">
-                  <label className="label"><span className="label-text">Enter OTP</span></label>
-                  <label className="input input-bordered flex items-center gap-2">
-                    <KeyRound className="w-4 h-4 text-base-content/40" />
-                    <input
-                      type="text"
-                      placeholder="Enter OTP code"
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      className="grow"
-                      maxLength={6}
-                      autoFocus
-                    />
-                  </label>
-                </div>
-                <button type="submit" disabled={loading || !otp.trim()} className="btn btn-primary btn-block gap-2">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  {loading ? 'Verifying...' : 'Verify & Login'}
-                </button>
-                <button type="button" onClick={() => { setStep('phone'); setOtp(''); setError(''); }} className="btn btn-ghost btn-sm btn-block gap-2">
-                  <ArrowLeft className="w-4 h-4" /> Change Number
-                </button>
-              </form>
-            )}
-
-            {/* Back to home */}
-            <div className="divider text-xs text-base-content/40">OR</div>
-            <button onClick={() => navigate('/')} className="btn btn-ghost btn-sm btn-block gap-2">
-              <ArrowLeft className="w-4 h-4" /> Back to Home
+          <div className="mt-6 border-t border-bone pt-4 text-center">
+            <button type="button" onClick={() => navigate('/')} className="btn btn-ghost btn-sm text-bark">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to home
             </button>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
