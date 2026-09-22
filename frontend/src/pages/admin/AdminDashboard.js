@@ -70,12 +70,12 @@ export default function AdminDashboard() {
           <AlertTriangle className="h-5 w-5 shrink-0 text-saddle" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="text-body-lg font-medium text-ink">
-              {pendingCount} claim{pendingCount === 1 ? '' : 's'} waiting on you
+              {pendingCount} open claim{pendingCount === 1 ? '' : 's'}
             </p>
-            <p className="text-body text-saddle">Submitted or flagged for manual review.</p>
+            <p className="text-body text-saddle">Drafts, submitted, processing or in review.</p>
           </div>
           <button type="button" onClick={() => navigate('/admin/claims')} className="btn btn-primary btn-sm">
-            Review now
+            View claims
           </button>
         </div>
       )}
@@ -87,7 +87,7 @@ export default function AdminDashboard() {
         <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <StatTile label="Farmers" value={(stats.totalUsers ?? 0).toLocaleString('en-IN')} hint="Registered" icon={Users} />
           <StatTile label="Claims" value={(stats.totalClaims ?? 0).toLocaleString('en-IN')} hint="Total filed" icon={ClipboardCheck} />
-          <StatTile label="Pending" value={pendingCount} hint="Awaiting review" emphasis={pendingCount > 0} icon={AlertTriangle} />
+          <StatTile label="Open" value={pendingCount} hint="Not yet decided" emphasis={pendingCount > 0} icon={AlertTriangle} />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3">
           <StatTile label="Approved" value={stats.approvedClaims ?? 0} />
