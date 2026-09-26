@@ -28,6 +28,8 @@ const userSchema = new mongoose.Schema(
       totalArea: Number, // in acres
       crops: [String],
       landRegistrationNo: String,
+      primaryCrop: String,
+      soilType: String,
     },
     lastLogin: Date,
   },

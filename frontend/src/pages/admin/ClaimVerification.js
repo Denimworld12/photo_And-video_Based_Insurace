@@ -66,9 +66,13 @@ export default function ClaimVerification() {
     fetchClaims();
   }, [fetchClaims]);
 
+  // A failed run stores payout 0 as a stand-in for "nothing measured", which is
+  // not a suggestion; a completed run that measured 0 is one.
   const suggestedPayout = (claim) => {
-    const calc = claim?.processingResult?.payout_calculation;
-    return calc?.payout_amount ?? calc?.final_payout_amount ?? null;
+    if (!claim?.processingResult || claim.processingResult.pipeline_failed) return null;
+    const calc = claim.processingResult.payout_calculation;
+    const amount = calc?.payout_amount ?? calc?.final_payout_amount;
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
   };
 
   const openDetail = async (id) => {
@@ -80,7 +84,7 @@ export default function ClaimVerification() {
         // Pre-fill the amount the pipeline calculated, so approving at the
         // suggested figure is one click and any departure from it is deliberate.
         const suggested = suggestedPayout(data.claim);
-        setReviewForm({ status: '', payoutAmount: suggested > 0 ? String(suggested) : '', reviewNotes: '' });
+        setReviewForm({ status: '', payoutAmount: suggested != null ? String(suggested) : '', reviewNotes: '' });
         setReviewErrors({});
       } else {
         toast.error('That claim could not be opened.');
@@ -122,10 +126,13 @@ export default function ClaimVerification() {
       if (data.success) {
         setClaims((prev) => prev.map((c) => (c._id === selected._id ? { ...c, status: reviewForm.status } : c)));
         const farmer = selected.userId?.fullName || selected.userId?.phoneNumber || 'the farmer';
+        const amount = parseFloat(reviewForm.payoutAmount);
         toast.success(
-          reviewForm.status === 'approved'
-            ? `Claim approved. ₹${parseFloat(reviewForm.payoutAmount).toLocaleString('en-IN')} queued for ${farmer}.`
-            : `Claim rejected. ${farmer} has been told why and can resubmit.`
+          reviewForm.status !== 'approved'
+            ? `Claim rejected. ${farmer} has been told why and can resubmit.`
+            : amount > 0
+              ? `Claim approved. ₹${amount.toLocaleString('en-IN')} queued for ${farmer}.`
+              : `Claim approved with no payout. ${farmer} has been told nothing is due.`
         );
         setConfirmOpen(false);
         setSelected(null);
@@ -143,6 +150,7 @@ export default function ClaimVerification() {
 
   const fmt = (d) =>
     d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const confidenceOf = (c) => (c.confidenceScore != null ? c.confidenceScore * 100 : null);
   const needsReview = (status) => NEEDS_REVIEW.includes(status);
 
   const handleSearch = (e) => {
@@ -256,6 +264,7 @@ export default function ClaimVerification() {
                   </div>
                   <StatusBadge status={c.status} />
                 </div>
+                <ConfidenceMeter value={confidenceOf(c)} label="AI confidence" />
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-caption capitalize text-bark">
                     {c.lossReason || 'Cause not given'} · {fmt(c.submittedAt || c.createdAt)}
@@ -275,7 +284,7 @@ export default function ClaimVerification() {
           <table className="hidden w-full xl:table">
             <thead>
               <tr className="border-b border-bone text-left">
-                {['Claim ID', 'Farmer', 'Crop', 'Cause', 'Status', 'Filed', ''].map((h, i) => (
+                {['Claim ID', 'Farmer', 'Crop', 'Cause', 'Confidence', 'Status', 'Filed', ''].map((h, i) => (
                   <th
                     key={h || i}
                     className="px-4 py-3 label-micro font-medium"
@@ -295,6 +304,9 @@ export default function ClaimVerification() {
                   </td>
                   <td className="px-4 py-3 text-body capitalize text-ink">{c.cropType || '—'}</td>
                   <td className="px-4 py-3 text-body capitalize text-bark">{c.lossReason || '—'}</td>
+                  <td className="w-40 px-4 py-3">
+                    <ConfidenceMeter value={confidenceOf(c)} label="AI confidence" compact />
+                  </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={c.status} />
                   </td>
@@ -378,9 +390,37 @@ export default function ClaimVerification() {
               ]
             : []
         }
-        confirmLabel={reviewForm.status === 'approved' ? 'Approve and queue payout' : 'Reject claim'}
+        confirmLabel={
+          reviewForm.status !== 'approved'
+            ? 'Reject claim'
+            : parseFloat(reviewForm.payoutAmount) > 0
+              ? 'Approve and queue payout'
+              : 'Approve with no payout'
+        }
       />
     </div>
+  );
+}
+
+/**
+ * The AI confidence for a claim, or a plain "Not measured" when the pipeline
+ * produced none. A missing score used to render as a confident-looking 0%.
+ */
+function ConfidenceMeter({ value, label, compact = false }) {
+  if (value == null) {
+    return (
+      <p className="flex items-center justify-between gap-2 text-caption text-bark">
+        {!compact && <span className="label-micro">{label}</span>}
+        <span>Not measured</span>
+      </p>
+    );
+  }
+  return (
+    <Meter
+      label={compact ? '' : label}
+      value={value}
+      caption={`${value.toFixed(compact ? 0 : 1)}%`}
+    />
   );
 }
 
@@ -397,8 +437,8 @@ function ClaimDetail({
   suggested,
   fmt,
 }) {
-  const confidence =
-    (claim.confidenceScore || claim.processingResult?.overall_assessment?.confidence_score || 0) * 100;
+  const rawConfidence = claim.confidenceScore ?? claim.processingResult?.overall_assessment?.confidence_score;
+  const confidence = Number.isFinite(rawConfidence) ? rawConfidence * 100 : null;
   const damage =
     claim.processingResult?.damage_percentage ??
     claim.processingResult?.damage_assessment?.final_damage_percent;
@@ -458,7 +498,7 @@ function ClaimDetail({
         <section className="rounded-lg border border-bone bg-parchment p-4">
           <h3 className="eyebrow">AI assessment</h3>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            <Meter label="Confidence" value={confidence} caption={`${confidence.toFixed(1)}%`} />
+            <ConfidenceMeter value={confidence} label="Confidence" />
             {damage != null && <Meter label="Damage" value={damage} caption={`${damage.toFixed(1)}%`} />}
           </div>
           <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-bone pt-3">
@@ -642,11 +682,11 @@ function ClaimDetail({
               <p className="flex items-center gap-2 text-body font-medium text-deep-olive">
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> Approved
               </p>
-              {claim.payoutAmount > 0 && (
-                <p className="mt-1 text-body text-ink">
-                  Payout ₹{claim.payoutAmount.toLocaleString('en-IN')}
-                </p>
-              )}
+              <p className="mt-1 text-body text-ink">
+                {claim.payoutAmount > 0
+                  ? `Payout ₹${claim.payoutAmount.toLocaleString('en-IN')}`
+                  : 'Approved with no payout due'}
+              </p>
               {claim.reviewNotes && <p className="mt-1 text-body text-saddle">{claim.reviewNotes}</p>}
             </div>
           )}

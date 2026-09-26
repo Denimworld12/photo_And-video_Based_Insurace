@@ -35,19 +35,37 @@ const resolveApprovedPayout = (claim, requestedAmount) => {
   return Number.isFinite(calculated) && calculated >= 0 ? calculated : null;
 };
 
+// A claim counts as paid once its status or its payout record says the money
+// left the system; either one alone is written by a settled payout.
+const DISBURSED_FILTER = { $or: [{ status: 'payout_complete' }, { payoutStatus: 'completed' }] };
+
 const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
   return { page, limit, skip: (page - 1) * limit };
 };
 
+/** Default farmer notification for a review that came without notes. */
+const reviewMessage = (documentId, status, payoutAmount) => {
+  if (status !== 'approved') return `Your claim ${documentId} has been ${status}.`;
+  return payoutAmount > 0
+    ? `Your claim ${documentId} has been approved for a payout of INR ${payoutAmount.toLocaleString('en-IN')}.`
+    : `Your claim ${documentId} has been approved with no payout due.`;
+};
+
 /* ─── Dashboard Stats ─── */
 exports.dashboardStats = async (req, res) => {
   try {
-    const [totalUsers, totalClaims, statusCounts, recentClaims] = await Promise.all([
+    const [totalUsers, totalClaims, statusCounts, disbursed, recentClaims] = await Promise.all([
       User.countDocuments({ role: 'farmer' }),
       Claim.countDocuments(),
       Claim.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      // Money that has actually been paid out. Approved and pending payouts are
+      // a promise, not a disbursement, so they are not counted here.
+      Claim.aggregate([
+        { $match: DISBURSED_FILTER },
+        { $group: { _id: null, total: { $sum: '$payoutAmount' }, count: { $sum: 1 } } },
+      ]),
       Claim.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'phoneNumber fullName'),
     ]);
 
@@ -67,6 +85,8 @@ exports.dashboardStats = async (req, res) => {
           (statusMap.draft || 0) +
           (statusMap.processing || 0),
         payoutPending: statusMap.payout_pending || 0,
+        totalPayout: disbursed[0]?.total || 0,
+        paidClaims: disbursed[0]?.count || 0,
       },
       recentClaims: recentClaims.map((c) => ({
         documentId: c.documentId,
@@ -179,6 +199,9 @@ exports.allClaims = async (req, res) => {
         season: c.season,
         state: c.state,
         payoutAmount: c.payoutAmount,
+        // Null when nothing measured the claim (for example a failed pipeline
+        // run), which the queue shows as "not measured" rather than 0%.
+        confidenceScore: c.confidenceScore ?? null,
         createdAt: c.createdAt,
         submittedAt: c.submittedAt,
         user: c.userId ? { phoneNumber: c.userId.phoneNumber, fullName: c.userId.fullName } : null,
@@ -251,8 +274,10 @@ exports.reviewClaim = async (req, res) => {
     claim.reviewedAt = new Date();
 
     if (status === 'approved') {
+      // approvedPayout is never null here, so an explicit 0 is recorded as a
+      // zero-payout approval: approved, amount 0, and nothing left to pay out.
       claim.payoutAmount = approvedPayout;
-      claim.payoutStatus = claim.payoutAmount > 0 ? 'pending' : 'none';
+      claim.payoutStatus = approvedPayout > 0 ? 'pending' : 'none';
       claim.rejectionReason = '';
     } else {
       // Reversing an earlier approval must also withdraw the pending payout;
@@ -281,7 +306,7 @@ exports.reviewClaim = async (req, res) => {
           userId: claim.userId,
           title:
             status === 'approved' ? 'Claim Approved' : status === 'rejected' ? 'Claim Rejected' : 'Claim Under Review',
-          message: reviewNotes || `Your claim ${claim.documentId} has been ${status}.`,
+          message: reviewNotes || reviewMessage(claim.documentId, status, claim.payoutAmount),
           type: 'claim_update',
           relatedClaim: claim._id,
         });
@@ -317,3 +342,4 @@ exports.activityLogs = async (req, res) => {
 
 // Exported for tests
 exports._resolveApprovedPayout = resolveApprovedPayout;
+exports._reviewMessage = reviewMessage;

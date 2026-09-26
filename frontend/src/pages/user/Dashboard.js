@@ -16,6 +16,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [claims, setClaims] = useState([]);
   const [totalClaims, setTotalClaims] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({});
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -30,6 +31,8 @@ export default function Dashboard() {
       ]);
       setClaims(claimsRes.data.claims || []);
       setTotalClaims(claimsRes.data.pagination?.total ?? (claimsRes.data.claims || []).length);
+      // Counted by the backend across every claim, not just the ten fetched.
+      setStatusCounts(claimsRes.data.statusCounts || {});
       setPolicies(policiesRes.data.insurances || policiesRes.data.policies || []);
     } catch (err) {
       // Previously both requests were `.catch(() => empty)`, so a dead backend
@@ -44,11 +47,12 @@ export default function Dashboard() {
     fetchData();
   }, [fetchData]);
 
+  const countOf = (statuses) => statuses.reduce((sum, s) => sum + (statusCounts[s] || 0), 0);
   const stats = {
     total: totalClaims,
-    pending: claims.filter((c) => c && PENDING.includes(c.status)).length,
-    approved: claims.filter((c) => c && SETTLED.includes(c.status)).length,
-    rejected: claims.filter((c) => c && c.status === 'rejected').length,
+    pending: countOf(PENDING),
+    approved: countOf(SETTLED),
+    rejected: countOf(['rejected']),
   };
 
   const firstName = (user?.fullName || '').split(' ')[0];
