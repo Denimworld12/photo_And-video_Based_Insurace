@@ -61,7 +61,7 @@ auto-rejected. An administrator has the final decision on every payout.
 | Role | Can do |
 |------|--------|
 | **Farmer** | Browse policies, file claims, capture GPS-tagged evidence, track status, read the AI assessment, download a PDF report, resubmit a rejected claim |
-| **Administrator** | Review and approve or reject claims with a payout amount, manage policies, activate and deactivate accounts, read the audit log |
+| **Administrator** | Review and approve or reject claims with a payout amount, release approved payouts, publish, unpublish and republish policies, activate and deactivate accounts, read the audit log |
 
 A user becomes an administrator by signing in with the phone number in `ADMIN_PHONE_NUMBER`.
 
@@ -388,11 +388,11 @@ the `admin` role. A claim belonging to another user is reported as not found.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/list` | The caller's claims. Query: `page`, `limit` |
+| `GET` | `/list` | The caller's claims. Query: `page`, `limit`. Also returns `statusCounts`, per-status totals across all of the caller's claims rather than just this page |
 | `POST` | `/initialize` | Open a claim from a policy and a form payload; returns a `documentId` |
-| `POST` | `/upload` | Upload one evidence photo (multipart: `image`, `lat`, `lon`, `client_ts`, `parcel_id`, `step_id`). `lat` and `lon` are required; JPEG, PNG, WebP and HEIC/HEIF are accepted |
+| `POST` | `/upload` | Upload one evidence photo (multipart: `image`, `lat`, `lon`, `client_ts`, `parcel_id`, `step_id`). `lat` and `lon` are optional but go together: leave both out when the device gave no location, and the pipeline skips location and weather verification; JPEG, PNG, WebP and HEIC/HEIF are accepted |
 | `POST` | `/complete` | Close evidence collection and run the assessment pipeline |
-| `GET` | `/results/:documentId` | The assessment for a claim |
+| `GET` | `/results/:documentId` | The assessment for a claim, plus its recorded decision: `status`, `payoutAmount`, and, once an admin has reviewed it, `manuallyReviewed`, `reviewNotes` and `reviewedAt` |
 | `GET` | `/summarize/:documentId` | Gemini plain-language summary. Query: `refresh=1` to regenerate |
 | `POST` | `/resubmit/:documentId` | Open a fresh claim from a rejected one, up to `MAX_RESUBMISSIONS` times |
 
@@ -400,18 +400,19 @@ the `admin` role. A claim belonging to another user is reported as not found.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/list` | All policies |
+| `GET` | `/list` | Published policies (the seed policies while none is published) |
+| `GET` | `/admin/list` | Policies by publication state (admin). Query: `status=active\|inactive\|all`; returns per-state `counts` |
 | `GET` | `/:id` | One policy |
 | `POST` | `/` | Create a policy (admin) |
-| `PUT` | `/:id` | Update a policy (admin) |
-| `DELETE` | `/:id` | Withdraw a policy (admin). Soft delete — sets `isActive: false`, so it disappears from `/list` but the record is kept |
+| `PUT` | `/:id` | Update a policy (admin). `isActive: true` republishes an unpublished one |
+| `DELETE` | `/:id` | Withdraw a policy (admin). Soft delete — sets `isActive: false`, so it disappears from `/list` but the record is kept and listed by `/admin/list?status=inactive` |
 
 ### User — `/api/user`
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/profile` | The caller's profile |
-| `PUT` | `/profile` | Update name, email, address and farm details |
+| `PUT` | `/profile` | Update name, email, address and farm details (including `primaryCrop` and `soilType`). An empty string for an optional field clears it |
 
 ### Notifications — `/api/notifications`
 
@@ -425,12 +426,13 @@ the `admin` role. A claim belonging to another user is reported as not found.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/dashboard` | Platform statistics and recent claims |
+| `GET` | `/dashboard` | Platform statistics and recent claims. `totalPayout` sums `payoutAmount` over claims whose payout an admin has released |
 | `GET` | `/users` | Accounts. Query: `page`, `limit`, `search` |
 | `PATCH` | `/users/:id/toggle-active` | Activate or deactivate an account |
-| `GET` | `/claims` | All claims. Query: `page`, `limit`, `status`, `search` |
+| `GET` | `/claims` | All claims, with `confidenceScore` (null when nothing measured it). Query: `page`, `limit`, `status`, `search` |
 | `GET` | `/claims/:id` | One claim in full, with evidence and AI assessment |
-| `PATCH` | `/claims/:id/review` | Record a decision. Body: `status`, `reviewNotes`, `payoutAmount` |
+| `PATCH` | `/claims/:id/review` | Record a decision. Body: `status`, `reviewNotes`, `payoutAmount`. An explicit `payoutAmount: 0` approves with nothing due; omitting it adopts the pipeline's figure |
+| `PATCH` | `/claims/:id/release-payout` | Release an approved claim's pending payout. Marks it `payout_complete`, records the releasing admin (`payoutReleasedBy`) and time (`payoutDate`), and from then on counts it in the dashboard's `totalPayout`. 409 unless the claim is approved with a non-zero pending payout |
 | `GET` | `/activity-logs` | Audit trail. Query: `page`, `limit` |
 
 ### Health
@@ -534,7 +536,7 @@ production deployment cannot log anyone in — see [Known gaps](#known-gaps).
 | `npm run dev` fails in `backend/` | `nodemon` is not a declared dependency. Install it globally or use `npm start`. |
 | Claims always come back as manual review with no damage figure | The backend could not run the pipeline. Check `PYTHON_COMMAND` and that `numpy`, `opencv-python`, `Pillow` and `requests` are importable from that interpreter. |
 | Pipeline times out | It is capped by `PYTHON_PIPELINE_TIMEOUT_MS` (default two minutes). Large images are the usual cause. |
-| "Your location is not available" during photo capture | The browser refused or could not obtain GPS. Evidence cannot be submitted without coordinates, so submission stays blocked until location is allowed (use **Try again**) and any photo taken without a fix is retaken. Geolocation also requires a secure context — `localhost` or HTTPS. |
+| "Your location is not available" during photo capture | The browser refused or could not obtain GPS. The photos can still be submitted: they are stored with no location, and the pipeline skips location and weather verification, so the claim usually ends up in manual review. Use **Try again** to allow location, and retake any photo taken without a fix for a faster assessment. Geolocation also requires a secure context — `localhost` or HTTPS. |
 | The camera will not open | `getUserMedia` needs `localhost` or HTTPS, and browser camera permission. The gallery upload path is the fallback. |
 | No SMS arrives with the login code | In mock mode (the development default) none is sent; read the code from the backend log. With mock mode off, SMS sending is not implemented yet. |
 | No install prompt for the PWA | Chrome and Edge only, over HTTPS or `localhost`. On iOS use Safari: Share, then Add to Home Screen. |

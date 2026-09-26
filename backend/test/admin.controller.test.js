@@ -10,7 +10,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { _resolveApprovedPayout: resolveApprovedPayout } = require('../src/controllers/admin.controller');
+const {
+  _resolveApprovedPayout: resolveApprovedPayout,
+  _reviewMessage: reviewMessage,
+} = require('../src/controllers/admin.controller');
 const { fallbackResult } = require('../src/services/python.service');
 
 const manualReviewClaim = (payoutAmount) => ({
@@ -73,4 +76,10 @@ test('a completed run that measured a zero payout still resolves to zero', () =>
   // A successful assessment that lands on 0 is a real measurement, unlike the
   // fallback's stand-in, so it needs no second opinion from the admin.
   assert.strictEqual(resolveApprovedPayout(manualReviewClaim(0), undefined), 0);
+});
+
+test('the default approval notice tells a zero-payout approval apart from a paid one', () => {
+  assert.match(reviewMessage('CLM-1', 'approved', 45000), /payout of INR 45,000/);
+  assert.match(reviewMessage('CLM-1', 'approved', 0), /approved with no payout due/);
+  assert.strictEqual(reviewMessage('CLM-1', 'rejected', 0), 'Your claim CLM-1 has been rejected.');
 });

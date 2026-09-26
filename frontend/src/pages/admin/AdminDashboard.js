@@ -6,7 +6,7 @@ import StatTile from '../../components/ui/StatTile';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { LoadingState, ErrorState, EmptyState } from '../../components/ui/States';
 import {
-  Users, ClipboardCheck, FileText, Activity, AlertTriangle, ArrowRight, Eye,
+  Users, ClipboardCheck, FileText, Activity, AlertTriangle, ArrowRight, Eye, Banknote,
 } from 'lucide-react';
 
 const QUICK_ACTIONS = [
@@ -84,10 +84,18 @@ export default function AdminDashboard() {
         <h2 id="platform-figures" className="eyebrow">
           Platform figures
         </h2>
-        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Farmers" value={(stats.totalUsers ?? 0).toLocaleString('en-IN')} hint="Registered" icon={Users} />
           <StatTile label="Claims" value={(stats.totalClaims ?? 0).toLocaleString('en-IN')} hint="Total filed" icon={ClipboardCheck} />
           <StatTile label="Open" value={pendingCount} hint="Not yet decided" emphasis={pendingCount > 0} icon={AlertTriangle} />
+          {/* Sum of payouts on settled claims only; approved-but-unpaid
+              amounts are not money that has reached a farmer yet. */}
+          <StatTile
+            label="Disbursed"
+            value={`₹${(stats.totalPayout ?? 0).toLocaleString('en-IN')}`}
+            hint={`Paid to farmers · ${stats.paidClaims ?? 0} claim${stats.paidClaims === 1 ? '' : 's'}`}
+            icon={Banknote}
+          />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3">
           <StatTile label="Approved" value={stats.approvedClaims ?? 0} />

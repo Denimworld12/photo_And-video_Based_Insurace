@@ -258,7 +258,9 @@ exports.uploadImage = async (req, res) => {
       });
     }
 
-    const coords = { lat: Number(lat), lon: Number(lon) };
+    // No coordinates is a genuine "location refused" state and is stored as
+    // such; the pipeline then skips location and weather verification.
+    const coords = Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : undefined;
 
     // Upload to Cloudinary
     let cloudinaryData = {};
@@ -277,7 +279,7 @@ exports.uploadImage = async (req, res) => {
       localPath: req.file.path,
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
-      coordinates: coords,
+      ...(coords && { coordinates: coords }),
       capturedAt: Number.isNaN(capturedAt.getTime()) ? new Date() : capturedAt,
       // Taken from the media type the upload allowlist already verified, not
       // from a client-declared field: a photo mislabelled as video would be
@@ -521,6 +523,13 @@ exports.getClaimResults = async (req, res) => {
         resubmittedFrom: claim.resubmittedFrom || null,
         confidenceScore: claim.confidenceScore ?? null,
         payoutAmount: claim.payoutAmount || 0,
+        payoutStatus: claim.payoutStatus || 'none',
+        // Set only once an admin has decided the claim by hand. The pipeline's
+        // own verdict in processing_result predates that decision, so the
+        // farmer's results page reads these to show what actually happened.
+        manuallyReviewed: Boolean(claim.reviewedAt),
+        reviewNotes: claim.reviewedAt ? claim.reviewNotes || null : null,
+        reviewedAt: claim.reviewedAt || null,
         insuranceId: claim.insuranceId || null,
         uploadedImages: imageUrls,
       },
@@ -542,23 +551,34 @@ exports.listClaims = async (req, res) => {
 
     let claims;
     let total;
+    // Per-status counts across every claim the caller can see, not just this
+    // page, so a summary built from them is not an undercount.
+    const statusCounts = {};
 
     if (isDbConnected()) {
       const filter = req.user.role === 'admin' ? {} : { userId: req.user._id };
-      [claims, total] = await Promise.all([
+      let grouped;
+      [claims, total, grouped] = await Promise.all([
         Claim.find(filter)
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit)
           .populate('userId', 'phoneNumber fullName'),
         Claim.countDocuments(filter),
+        Claim.aggregate([{ $match: filter }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
       ]);
+      grouped.forEach((g) => {
+        statusCounts[g._id] = g.count;
+      });
     } else {
       // Development fallback. Still scoped to the caller: the cache holds every
       // user's claims, so returning it unfiltered would leak them.
       const visible = Array.from(claimCache.values()).filter((c) => canAccess(c, req.user));
       total = visible.length;
       claims = visible.slice(skip, skip + limit);
+      visible.forEach((c) => {
+        statusCounts[c.status] = (statusCounts[c.status] || 0) + 1;
+      });
     }
 
     res.json({
@@ -581,6 +601,7 @@ exports.listClaims = async (req, res) => {
           : undefined,
       })),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      statusCounts,
     });
   } catch (err) {
     console.error('[CLAIM:LIST] Failed to fetch claims:', err.message);

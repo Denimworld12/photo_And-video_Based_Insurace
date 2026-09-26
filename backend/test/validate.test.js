@@ -33,9 +33,29 @@ const runMiddleware = (middleware, req) => {
   return { nextCalled, res };
 };
 
-test('claimUpload requires coordinates', () => {
-  const { error } = schemas.claimUpload.validate({ parcel_id: 'CLM-1', step_id: 'corner_1' });
-  assert.ok(error, 'coordinates must not be optional');
+test('claimUpload accepts a photo with no location', () => {
+  // Geolocation refused is a real state; requiring a value would make one up.
+  const { error, value } = schemas.claimUpload.validate({ parcel_id: 'CLM-1', step_id: 'corner_1' });
+  assert.ifError(error);
+  assert.strictEqual(value.lat, undefined);
+  assert.strictEqual(value.lon, undefined);
+});
+
+test('claimUpload treats empty coordinate fields as no location', () => {
+  const { error, value } = schemas.claimUpload.validate({
+    parcel_id: 'CLM-1',
+    step_id: 'corner_1',
+    lat: '',
+    lon: '',
+  });
+  assert.ifError(error);
+  assert.strictEqual(value.lat, undefined);
+  assert.strictEqual(value.lon, undefined);
+});
+
+test('claimUpload rejects half a coordinate pair', () => {
+  const { error } = schemas.claimUpload.validate({ parcel_id: 'CLM-1', step_id: 'corner_1', lat: '19.1' });
+  assert.ok(error, 'a latitude without a longitude is not a location');
 });
 
 test('claimUpload rejects non-numeric coordinates', () => {
@@ -134,4 +154,29 @@ test('validateObjectId rejects a malformed id with 400, not a 500', () => {
 test('validateObjectId passes a well-formed id through', () => {
   const { nextCalled } = runMiddleware(validateObjectId('id'), { params: { id: '507f1f77bcf86cd799439011' } });
   assert.strictEqual(nextCalled, true);
+});
+
+test('updateProfile accepts primary crop and soil type', () => {
+  const { error, value } = schemas.updateProfile.validate({
+    farmDetails: { primaryCrop: 'Wheat', soilType: 'Black cotton' },
+  });
+  assert.ifError(error);
+  assert.deepStrictEqual(value.farmDetails, { primaryCrop: 'Wheat', soilType: 'Black cotton' });
+});
+
+test('updateProfile accepts an explicit empty value as a clear', () => {
+  const { error, value } = schemas.updateProfile.validate({
+    email: '',
+    address: { village: '', pincode: '' },
+    farmDetails: { totalArea: '', primaryCrop: '' },
+  });
+  assert.ifError(error);
+  assert.strictEqual(value.email, '');
+  assert.strictEqual(value.address.village, '');
+  assert.strictEqual(value.address.pincode, '');
+});
+
+test('updateProfile still rejects a malformed pincode', () => {
+  const { error } = schemas.updateProfile.validate({ address: { pincode: '12' } });
+  assert.ok(error);
 });

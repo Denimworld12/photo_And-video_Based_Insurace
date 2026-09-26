@@ -6,6 +6,8 @@ const { validate, validateObjectId, schemas } = require('../middleware/validate'
 
 // Public
 router.get('/list', ctrl.listPolicies);
+// Declared before '/:id', which would otherwise treat "admin" as a policy id.
+router.get('/admin/list', authenticate, roleGuard('admin'), ctrl.listPoliciesForAdmin);
 router.get('/:id', ctrl.getPolicy);
 
 // Admin only

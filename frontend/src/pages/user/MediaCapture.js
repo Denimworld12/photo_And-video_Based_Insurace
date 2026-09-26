@@ -199,8 +199,9 @@ export default function MediaCapture() {
         const fd = new FormData();
         fd.append('image', cd.blob, `${stepId}.jpg`);
         // Without a fix, the coordinates are left out rather than sent as
-        // 0/0 — an upload the backend refuses is better than a photo filed
-        // under a GPS tag the farmer never gave.
+        // 0/0. The backend stores that as "no location" and skips the
+        // location and weather checks, instead of filing the photo under a
+        // GPS tag the farmer never gave.
         if (cd.coords?.lat != null && cd.coords?.lon != null) {
           fd.append('lat', cd.coords.lat.toString());
           fd.append('lon', cd.coords.lon.toString());
@@ -241,7 +242,7 @@ export default function MediaCapture() {
   const capturedCount = Object.keys(capturedBlobs).length;
   const allCaptured = CAPTURE_STEPS.every((s) => capturedBlobs[s.id]);
   const missingCoords = Object.values(capturedBlobs).filter((cd) => cd.coords?.lat == null).length;
-  const canSubmit = capturedCount > 0 && missingCoords === 0;
+  const canSubmit = capturedCount > 0;
   const activeStep = CAPTURE_STEPS[currentStep];
 
   return (
@@ -279,8 +280,9 @@ export default function MediaCapture() {
             <div className="flex flex-wrap items-start gap-3 rounded-md border border-honey-amber bg-honey-amber/20 px-3 py-2.5">
               <MapPinOff className="mt-0.5 h-4 w-4 shrink-0 text-saddle" aria-hidden="true" />
               <p className="min-w-0 flex-1 text-body text-saddle">
-                <span className="font-medium">Your location is not available.</span> Evidence photos cannot be
-                submitted without it — allow location access, then take the photos again.
+                <span className="font-medium">Your location is not available.</span> You can still submit, but
+                photos without a location cannot be checked against your field or local weather, so the claim is
+                likely to need a manual review. Allow location access before taking the photos if you can.
               </p>
               {geoState === 'denied' && (
                 <button type="button" onClick={retryLocation} className="btn btn-outline btn-sm">
@@ -469,8 +471,9 @@ export default function MediaCapture() {
           {missingCoords > 0 && (
             <p className="mb-3 flex items-start gap-2 text-body text-saddle">
               <MapPinOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              {missingCoords} photo{missingCoords === 1 ? ' was' : 's were'} taken without a location fix and cannot be
-              submitted. Turn location on, then retake {missingCoords === 1 ? 'it' : 'them'}.
+              {missingCoords} photo{missingCoords === 1 ? ' was' : 's were'} taken without a location fix. You can
+              submit anyway, or turn location on and retake {missingCoords === 1 ? 'it' : 'them'} for a faster
+              assessment.
             </p>
           )}
           <button
@@ -508,7 +511,13 @@ export default function MediaCapture() {
         }
         summary={[
           { label: 'Photos', value: `${capturedCount} of ${CAPTURE_STEPS.length}` },
-          { label: 'Location', value: 'GPS attached to every photo' },
+          {
+            label: 'Location',
+            value:
+              missingCoords === 0
+                ? 'GPS attached to every photo'
+                : `${missingCoords} of ${capturedCount} photo${capturedCount === 1 ? '' : 's'} without a location`,
+          },
           { label: 'Claim', value: documentId },
         ]}
         confirmLabel={allCaptured ? 'Submit photos' : 'Submit anyway'}

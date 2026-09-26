@@ -25,8 +25,8 @@ const SEED_POLICIES = [
     name: 'Weather Based Crop Insurance Scheme',
     code: 'WBCIS',
     type: 'weather',
-    shortDescription: 'Weather-based protection with real-time satellite monitoring',
-    description: 'Insurance based on weather parameters like rainfall, temperature, humidity etc.',
+    shortDescription: 'Weather-based protection, with claims verified from your field photos',
+    description: 'Insurance based on weather parameters like rainfall, temperature and humidity. File a claim with photo and video evidence from your field; computer-vision analysis checks the damage and the weather recorded for your location.',
     imageUrl: '/images/wbcis.jpg',
     schemes: [{ name: 'WBCIS Weather Shield', code: 'WBCI001', seasons: ['Kharif', 'Rabi'], coverage: { percentage: 80, maxAmount: 150000 } }],
     availableStates: ['Gujarat', 'Karnataka', 'Tamil Nadu', 'Andhra Pradesh', 'Telangana'],
@@ -68,6 +68,43 @@ exports.listPolicies = async (req, res) => {
     res.json({ success: true, insurances: policies, count: policies.length, source });
   } catch (err) {
     console.error('[POLICY:LIST] Failed to fetch policies:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch policies' });
+  }
+};
+
+/* ─── Admin: List Policies by Publication State ─── */
+// The public list only ever shows published policies, so an unpublished one
+// had no way back into view. `?status=inactive` lists those so an admin can
+// republish them; `active` (the default) matches what farmers see, seed
+// policies included; `all` returns every stored policy.
+const ADMIN_POLICY_FILTERS = { active: { isActive: true }, inactive: { isActive: false }, all: {} };
+
+exports.listPoliciesForAdmin = async (req, res) => {
+  try {
+    const status = req.query.status || 'active';
+    const filter = ADMIN_POLICY_FILTERS[status];
+    if (!filter) {
+      return res.status(400).json({ success: false, error: 'status must be one of: active, inactive, all' });
+    }
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, error: 'Policy administration needs the database' });
+    }
+
+    const policies = await Policy.find(filter).sort({ createdAt: -1 }).select('-__v');
+    const counts = {
+      active: await Policy.countDocuments({ isActive: true }),
+      inactive: await Policy.countDocuments({ isActive: false }),
+    };
+
+    // Farmers are served the seed policies while nothing is published, so the
+    // admin view says so rather than claiming no policy is on offer.
+    if (status === 'active' && !policies.length) {
+      return res.json({ success: true, policies: SEED_POLICIES, counts, source: 'seed' });
+    }
+
+    res.json({ success: true, policies, counts, source: 'database' });
+  } catch (err) {
+    console.error('[POLICY:ADMIN-LIST] Failed to fetch policies:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch policies' });
   }
 };

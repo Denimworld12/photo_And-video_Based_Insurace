@@ -83,6 +83,9 @@ const claimSchema = new mongoose.Schema(
       enum: ['none', 'pending', 'processing', 'completed', 'failed'],
       default: 'none',
     },
+    // Set only by the admin action that releases the payout: who released it
+    // and when. A claim counts as disbursed from this point on.
+    payoutReleasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     payoutDate: Date,
 
     submittedAt: Date,
