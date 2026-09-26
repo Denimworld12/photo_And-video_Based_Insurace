@@ -49,7 +49,11 @@ const install = (claims) => {
   Claim.findById = async (id) => claims.find((c) => String(c._id) === String(id)) || null;
   Claim.countDocuments = async () => claims.length;
   Claim.aggregate = async ([first, second]) => {
-    if (first.$group) return [];
+    if (first.$group) {
+      const counts = {};
+      for (const c of claims) counts[c.status] = (counts[c.status] || 0) + 1;
+      return Object.entries(counts).map(([_id, count]) => ({ _id, count }));
+    }
     const matched = claims.filter((c) => matches(c, first.$match));
     if (!matched.length) return [];
     assert.deepStrictEqual(second.$group, { _id: null, total: { $sum: '$payoutAmount' }, count: { $sum: 1 } });
@@ -157,4 +161,26 @@ test('releasing an unknown claim is a 404', async () => {
   install([]);
   const res = await release(claim());
   assert.strictEqual(res.statusCode, 404);
+});
+
+test('a released payout still counts as an approved claim', async () => {
+  const approved = claim();
+  install([approved, claim({ status: 'rejected', payoutAmount: 0, payoutStatus: 'none' })]);
+
+  assert.strictEqual((await dashboard()).approvedClaims, 1);
+  await release(approved);
+  assert.strictEqual((await dashboard()).approvedClaims, 1);
+});
+
+test('a failed audit write does not report a committed release as a failure', async () => {
+  const approved = claim();
+  install([approved]);
+  AdminAction.create = async () => {
+    throw new Error('audit store unavailable');
+  };
+
+  const res = await release(approved);
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(res.body.success, true);
+  assert.strictEqual(approved.status, 'payout_complete');
 });

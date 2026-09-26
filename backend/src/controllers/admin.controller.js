@@ -89,7 +89,8 @@ exports.dashboardStats = async (req, res) => {
       stats: {
         totalUsers,
         totalClaims,
-        approvedClaims: statusMap.approved || 0,
+        approvedClaims:
+          (statusMap.approved || 0) + (statusMap.payout_pending || 0) + (statusMap.payout_complete || 0),
         rejectedClaims: statusMap.rejected || 0,
         pendingClaims:
           (statusMap.manual_review || 0) +
@@ -365,14 +366,18 @@ exports.releasePayout = async (req, res) => {
       });
     }
 
-    await AdminAction.create({
-      adminId: req.user._id,
-      action: 'process_payout',
-      targetType: 'claim',
-      targetId: claim._id.toString(),
-      details: { payoutAmount: claim.payoutAmount, releasedAt },
-      ipAddress: req.ip,
-    });
+    try {
+      await AdminAction.create({
+        adminId: req.user._id,
+        action: 'process_payout',
+        targetType: 'claim',
+        targetId: claim._id.toString(),
+        details: { payoutAmount: claim.payoutAmount, releasedAt },
+        ipAddress: req.ip,
+      });
+    } catch (err) {
+      console.error(`[ADMIN:PAYOUT] Audit entry not recorded for claim ${claim.documentId}:`, err.message);
+    }
 
     if (claim.userId) {
       try {
