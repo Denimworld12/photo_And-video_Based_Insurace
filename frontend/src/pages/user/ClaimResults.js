@@ -66,6 +66,24 @@ const DECISION = {
   },
 };
 
+// What an assessor's recorded decision means for the verdict panel. The claim's
+// status is the decision that actually happened; the pipeline's own
+// final_decision is only a recommendation, and an admin may have overruled it.
+const STATUS_DECISION = {
+  approved: 'APPROVE',
+  payout_pending: 'APPROVE',
+  payout_complete: 'APPROVE',
+  rejected: 'REJECT',
+  manual_review: 'MANUAL_REVIEW',
+  field_verification: 'MANUAL_REVIEW',
+  disputed: 'MANUAL_REVIEW',
+};
+
+const MANUAL_MESSAGE = {
+  APPROVE: 'An assessor reviewed your claim and approved it.',
+  REJECT: 'An assessor reviewed your claim and did not accept it. You can resubmit with clearer evidence.',
+};
+
 const PROCESSING = {
   Icon: Loader2,
   title: 'Still processing',
@@ -113,7 +131,11 @@ export default function ClaimResults() {
     fetchResults();
   }, [fetchResults]);
 
-  const finalDecision = result?.overall_assessment?.final_decision;
+  const claimStatus = claimInfo?.status;
+  const finalDecision =
+    claimStatus === 'processing'
+      ? null
+      : STATUS_DECISION[claimStatus] || result?.overall_assessment?.final_decision;
   const isProcessing = Boolean(result) && !DECISION[finalDecision];
 
   // A claim still being assessed used to sit on a frozen screen with a
@@ -172,7 +194,10 @@ export default function ClaimResults() {
     );
   }
 
-  const confidence = result.overall_assessment?.confidence_score || 0;
+  // Null when nothing measured the claim, such as a failed pipeline run; that
+  // reads as "not measured", never as a measured 0%.
+  const rawConfidence = result.overall_assessment?.confidence_score;
+  const confidence = Number.isFinite(rawConfidence) ? rawConfidence : null;
   const damageType = result.damage_type || 'Not classified';
   const damagePercent =
     result.damage_percentage ?? result.damage_assessment?.final_damage_percent ?? 0;
@@ -182,10 +207,27 @@ export default function ClaimResults() {
   const imagesProcessed = result.images_processed || 0;
   const totalFieldAreaM2 = result.area_info?.total_field_area_m2 || 0;
   const areaMethod = result.area_info?.estimation_method || 'Estimated';
-  const payoutAmount = payout.payout_amount || payout.final_payout_amount || 0;
+  const pipelinePayout = payout.payout_amount || payout.final_payout_amount || 0;
+  const isApproved = finalDecision === 'APPROVE';
+  const manuallyReviewed = Boolean(claimInfo?.manuallyReviewed);
+  // Once approved, the amount recorded on the claim is what the farmer is paid
+  // (an assessor may have changed it, down to an explicit zero). Before that,
+  // the pipeline's figure is only an estimate awaiting a decision.
+  const payoutAmount = isApproved && claimInfo ? claimInfo.payoutAmount ?? 0 : pipelinePayout;
+  const showPayout = isApproved || (finalDecision !== 'REJECT' && payoutAmount > 0);
+  const reviewNotes = claimStatus !== 'rejected' ? claimInfo?.reviewNotes : null;
   const evidence = claimInfo?.uploadedImages || [];
 
-  const verdict = DECISION[finalDecision] || PROCESSING;
+  const baseVerdict = DECISION[finalDecision] || PROCESSING;
+  const verdict = {
+    ...baseVerdict,
+    message:
+      isApproved && payoutAmount === 0
+        ? manuallyReviewed
+          ? 'An assessor reviewed your claim and approved it. No payout is due on this claim.'
+          : 'Your claim passed assessment. No payout is due on this claim.'
+        : (manuallyReviewed && MANUAL_MESSAGE[finalDecision]) || baseVerdict.message,
+  };
   const severity =
     damagePercent > 60 ? 'Critical' : damagePercent > 35 ? 'Severe' : damagePercent > 15 ? 'Moderate' : 'Minimal';
 
@@ -202,9 +244,9 @@ export default function ClaimResults() {
     doc.text('Decision', 20, y);
     y += 8;
     doc.setFontSize(10);
-    doc.text(`Status: ${finalDecision || 'PROCESSING'}`, 20, y);
+    doc.text(`Status: ${finalDecision || 'PROCESSING'}${manuallyReviewed ? ' (assessor decision)' : ''}`, 20, y);
     y += 6;
-    doc.text(`Confidence: ${(confidence * 100).toFixed(1)}%`, 20, y);
+    doc.text(`Confidence: ${confidence != null ? `${(confidence * 100).toFixed(1)}%` : 'Not measured'}`, 20, y);
     y += 12;
 
     doc.setFontSize(14);
@@ -220,7 +262,7 @@ export default function ClaimResults() {
     doc.text(`Images analysed: ${imagesProcessed}`, 20, y);
     y += 12;
 
-    if (Object.keys(payout).length > 0) {
+    if (showPayout || Object.keys(payout).length > 0) {
       doc.setFontSize(14);
       doc.text('Payout', 20, y);
       y += 8;
@@ -272,15 +314,42 @@ export default function ClaimResults() {
         </div>
       </div>
 
-      {payoutAmount > 0 && (
+      {reviewNotes && (
+        <p className="flex items-start gap-2 rounded-md border border-bone bg-parchment px-4 py-3 text-body text-saddle">
+          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-bark" aria-hidden="true" />
+          <span>
+            <span className="label-micro block">Assessor's note</span>
+            {reviewNotes}
+          </span>
+        </p>
+      )}
+
+      {showPayout && (
         <section className="rounded-lg border border-sage bg-sage/10 p-5">
-          <p className="eyebrow">Payout</p>
+          <p className="eyebrow">{isApproved ? 'Payout' : 'Estimated payout'}</p>
           <p className="mt-1 text-heading text-deep-olive">₹{payoutAmount.toLocaleString('en-IN')}</p>
           <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-sage/40 pt-4 sm:grid-cols-3">
             {[
-              { label: 'Sum insured', value: `₹${(payout.sum_insured || 0).toLocaleString('en-IN')}` },
-              { label: 'Damage applied', value: `${payout.damage_percent ?? damagePercent}%` },
-              { label: 'Status', value: finalDecision === 'APPROVE' ? 'Approved' : 'Pending decision' },
+              // A run that did not complete has no sum insured or damage figure;
+              // those rows are left out rather than shown as ₹0 and 0%.
+              ...(result.pipeline_failed
+                ? []
+                : [
+                    { label: 'Sum insured', value: `₹${(payout.sum_insured || 0).toLocaleString('en-IN')}` },
+                    { label: 'Damage applied', value: `${payout.damage_percent ?? damagePercent}%` },
+                  ]),
+              {
+                label: 'Status',
+                value: !isApproved
+                  ? 'Pending decision'
+                  : claimStatus === 'payout_complete'
+                    ? 'Paid'
+                    : payoutAmount === 0
+                      ? 'Approved, nothing due'
+                      : manuallyReviewed
+                        ? 'Approved by assessor'
+                        : 'Approved',
+              },
             ].map((d) => (
               <div key={d.label}>
                 <dt className="label-micro text-deep-olive/70">{d.label}</dt>
@@ -296,7 +365,14 @@ export default function ClaimResults() {
           <BarChart3 className="h-4 w-4 text-bark" aria-hidden="true" /> Damage assessment
         </h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <Meter label="AI confidence" value={confidence * 100} caption={`${(confidence * 100).toFixed(1)}%`} />
+          {confidence != null ? (
+            <Meter label="AI confidence" value={confidence * 100} caption={`${(confidence * 100).toFixed(1)}%`} />
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <span className="label-micro">AI confidence</span>
+              <span className="text-body text-bark">Not measured</span>
+            </div>
+          )}
           <Meter label="Damage" value={damagePercent} caption={`${damagePercent.toFixed(1)}% · ${severity}`} />
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 border-t border-bone pt-4 sm:grid-cols-3">

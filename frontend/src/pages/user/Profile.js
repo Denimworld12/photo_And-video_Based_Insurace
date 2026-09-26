@@ -11,8 +11,14 @@ const EMPTY = {
   fullName: '',
   email: '',
   address: { village: '', district: '', state: '', pincode: '' },
-  farmDetails: { totalArea: '' },
+  farmDetails: { totalArea: '', primaryCrop: '', soilType: '' },
 };
+
+const FARM_FIELDS = [
+  { key: 'totalArea', label: 'Total farm area (acres)', type: 'number', inputMode: 'decimal' },
+  { key: 'primaryCrop', label: 'Primary crop' },
+  { key: 'soilType', label: 'Soil type' },
+];
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
@@ -40,7 +46,11 @@ export default function Profile() {
             state: u.address?.state || '',
             pincode: u.address?.pincode || '',
           },
-          farmDetails: { totalArea: u.farmDetails?.totalArea ?? '' },
+          farmDetails: {
+            totalArea: u.farmDetails?.totalArea ?? '',
+            primaryCrop: u.farmDetails?.primaryCrop || '',
+            soilType: u.farmDetails?.soilType || '',
+          },
         });
       }
     } catch (err) {
@@ -72,28 +82,23 @@ export default function Profile() {
   };
 
   /**
-   * PUT /api/user/profile is Joi-validated and every optional field rejects an
-   * empty string, so a farmer with any blank field could never save. Only the
-   * fields they have actually filled in are sent.
+   * Every optional field is sent, blank or not. The backend reads an empty
+   * string as "clear this" and removes the stored value, so a farmer who
+   * deletes their email really does delete it rather than being told it saved.
    */
   const buildPayload = () => {
-    const payload = {};
-    const name = form.fullName.trim();
-    const email = form.email.trim();
-    if (name) payload.fullName = name;
-    if (email) payload.email = email;
+    const trimAll = (obj) =>
+      Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, String(value ?? '').trim()]));
 
-    const address = Object.entries(form.address).reduce((acc, [key, value]) => {
-      const trimmed = (value || '').trim();
-      if (trimmed) acc[key] = trimmed;
-      return acc;
-    }, {});
-    if (Object.keys(address).length) payload.address = address;
+    const farmDetails = trimAll(form.farmDetails);
+    if (farmDetails.totalArea) farmDetails.totalArea = parseFloat(farmDetails.totalArea);
 
-    const totalArea = String(form.farmDetails.totalArea).trim();
-    if (totalArea) payload.farmDetails = { totalArea: parseFloat(totalArea) };
-
-    return payload;
+    return {
+      fullName: form.fullName.trim(),
+      email: form.email.trim(),
+      address: trimAll(form.address),
+      farmDetails,
+    };
   };
 
   const handleSave = async () => {
@@ -244,9 +249,7 @@ export default function Profile() {
           <Sprout className="h-4 w-4 text-bark" aria-hidden="true" /> Farm details
         </h2>
         <div className="mt-4 grid gap-5 sm:grid-cols-2">
-          {[
-            { key: 'totalArea', label: 'Total farm area (acres)', type: 'number', inputMode: 'decimal' },
-          ].map((f) =>
+          {FARM_FIELDS.map((f) =>
             editing ? (
               <TextField
                 key={f.key}

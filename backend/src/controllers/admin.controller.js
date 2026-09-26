@@ -35,19 +35,49 @@ const resolveApprovedPayout = (claim, requestedAmount) => {
   return Number.isFinite(calculated) && calculated >= 0 ? calculated : null;
 };
 
+// Written only by releasePayout, so a claim counts as paid once an admin has
+// explicitly released its payout - never merely because it was approved.
+const DISBURSED_FILTER = { status: 'payout_complete', payoutStatus: 'completed' };
+
+// The state a claim must be in for its payout to be released: approved, with a
+// non-zero amount still waiting to be paid.
+const RELEASABLE_FILTER = { status: 'approved', payoutStatus: 'pending', payoutAmount: { $gt: 0 } };
+
+/** Why a claim's payout cannot be released, or null when it can. */
+const payoutReleaseBlocker = (claim) => {
+  if (claim.status === 'payout_complete') return 'This payout has already been released';
+  if (claim.status !== 'approved') return `Claim is ${claim.status}; only an approved claim can have its payout released`;
+  if (claim.payoutStatus !== 'pending' || !(claim.payoutAmount > 0)) return 'This claim has no pending payout to release';
+  return null;
+};
+
 const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || defaultLimit, 1), maxLimit);
   return { page, limit, skip: (page - 1) * limit };
 };
 
+/** Default farmer notification for a review that came without notes. */
+const reviewMessage = (documentId, status, payoutAmount) => {
+  if (status !== 'approved') return `Your claim ${documentId} has been ${status}.`;
+  return payoutAmount > 0
+    ? `Your claim ${documentId} has been approved for a payout of INR ${payoutAmount.toLocaleString('en-IN')}.`
+    : `Your claim ${documentId} has been approved with no payout due.`;
+};
+
 /* ─── Dashboard Stats ─── */
 exports.dashboardStats = async (req, res) => {
   try {
-    const [totalUsers, totalClaims, statusCounts, recentClaims] = await Promise.all([
+    const [totalUsers, totalClaims, statusCounts, disbursed, recentClaims] = await Promise.all([
       User.countDocuments({ role: 'farmer' }),
       Claim.countDocuments(),
       Claim.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      // Money that has actually been paid out. Approved and pending payouts are
+      // a promise, not a disbursement, so they are not counted here.
+      Claim.aggregate([
+        { $match: DISBURSED_FILTER },
+        { $group: { _id: null, total: { $sum: '$payoutAmount' }, count: { $sum: 1 } } },
+      ]),
       Claim.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'phoneNumber fullName'),
     ]);
 
@@ -59,7 +89,8 @@ exports.dashboardStats = async (req, res) => {
       stats: {
         totalUsers,
         totalClaims,
-        approvedClaims: statusMap.approved || 0,
+        approvedClaims:
+          (statusMap.approved || 0) + (statusMap.payout_pending || 0) + (statusMap.payout_complete || 0),
         rejectedClaims: statusMap.rejected || 0,
         pendingClaims:
           (statusMap.manual_review || 0) +
@@ -67,6 +98,8 @@ exports.dashboardStats = async (req, res) => {
           (statusMap.draft || 0) +
           (statusMap.processing || 0),
         payoutPending: statusMap.payout_pending || 0,
+        totalPayout: disbursed[0]?.total || 0,
+        paidClaims: disbursed[0]?.count || 0,
       },
       recentClaims: recentClaims.map((c) => ({
         documentId: c.documentId,
@@ -179,6 +212,9 @@ exports.allClaims = async (req, res) => {
         season: c.season,
         state: c.state,
         payoutAmount: c.payoutAmount,
+        // Null when nothing measured the claim (for example a failed pipeline
+        // run), which the queue shows as "not measured" rather than 0%.
+        confidenceScore: c.confidenceScore ?? null,
         createdAt: c.createdAt,
         submittedAt: c.submittedAt,
         user: c.userId ? { phoneNumber: c.userId.phoneNumber, fullName: c.userId.fullName } : null,
@@ -195,7 +231,9 @@ exports.allClaims = async (req, res) => {
 /* ─── Get Claim Detail (Admin) ─── */
 exports.getClaimDetail = async (req, res) => {
   try {
-    const claim = await Claim.findById(req.params.id).populate('userId', 'phoneNumber fullName address farmDetails');
+    const claim = await Claim.findById(req.params.id)
+      .populate('userId', 'phoneNumber fullName address farmDetails')
+      .populate('payoutReleasedBy', 'phoneNumber fullName');
     if (!claim) return res.status(404).json({ success: false, error: 'Claim not found' });
 
     // Build fallback URLs for images missing cloudinaryUrl
@@ -251,8 +289,10 @@ exports.reviewClaim = async (req, res) => {
     claim.reviewedAt = new Date();
 
     if (status === 'approved') {
+      // approvedPayout is never null here, so an explicit 0 is recorded as a
+      // zero-payout approval: approved, amount 0, and nothing left to pay out.
       claim.payoutAmount = approvedPayout;
-      claim.payoutStatus = claim.payoutAmount > 0 ? 'pending' : 'none';
+      claim.payoutStatus = approvedPayout > 0 ? 'pending' : 'none';
       claim.rejectionReason = '';
     } else {
       // Reversing an earlier approval must also withdraw the pending payout;
@@ -281,7 +321,7 @@ exports.reviewClaim = async (req, res) => {
           userId: claim.userId,
           title:
             status === 'approved' ? 'Claim Approved' : status === 'rejected' ? 'Claim Rejected' : 'Claim Under Review',
-          message: reviewNotes || `Your claim ${claim.documentId} has been ${status}.`,
+          message: reviewNotes || reviewMessage(claim.documentId, status, claim.payoutAmount),
           type: 'claim_update',
           relatedClaim: claim._id,
         });
@@ -295,6 +335,68 @@ exports.reviewClaim = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN:REVIEW] Failed to review claim:', err.message);
     res.status(500).json({ success: false, error: 'Failed to review claim' });
+  }
+};
+
+/* ─── Release Payout ─── */
+exports.releasePayout = async (req, res) => {
+  try {
+    const releasedAt = new Date();
+    // The state check and the write are one atomic update, so two admins
+    // releasing the same claim at once cannot both record a disbursement.
+    const claim = await Claim.findOneAndUpdate(
+      { _id: req.params.id, ...RELEASABLE_FILTER },
+      {
+        $set: {
+          status: 'payout_complete',
+          payoutStatus: 'completed',
+          payoutReleasedBy: req.user._id,
+          payoutDate: releasedAt,
+        },
+      },
+      { new: true }
+    );
+
+    if (!claim) {
+      const current = await Claim.findById(req.params.id);
+      if (!current) return res.status(404).json({ success: false, error: 'Claim not found' });
+      return res.status(409).json({
+        success: false,
+        error: payoutReleaseBlocker(current) || 'The payout could not be released',
+      });
+    }
+
+    try {
+      await AdminAction.create({
+        adminId: req.user._id,
+        action: 'process_payout',
+        targetType: 'claim',
+        targetId: claim._id.toString(),
+        details: { payoutAmount: claim.payoutAmount, releasedAt },
+        ipAddress: req.ip,
+      });
+    } catch (err) {
+      console.error(`[ADMIN:PAYOUT] Audit entry not recorded for claim ${claim.documentId}:`, err.message);
+    }
+
+    if (claim.userId) {
+      try {
+        await Notification.create({
+          userId: claim.userId,
+          title: 'Payout Released',
+          message: `The payout of INR ${claim.payoutAmount.toLocaleString('en-IN')} for your claim ${claim.documentId} has been released.`,
+          type: 'claim_update',
+          relatedClaim: claim._id,
+        });
+      } catch (err) {
+        console.error(`[ADMIN:PAYOUT] Notification not created for claim ${claim.documentId}:`, err.message);
+      }
+    }
+
+    res.json({ success: true, claim });
+  } catch (err) {
+    console.error('[ADMIN:PAYOUT] Failed to release payout:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to release payout' });
   }
 };
 
@@ -317,3 +419,4 @@ exports.activityLogs = async (req, res) => {
 
 // Exported for tests
 exports._resolveApprovedPayout = resolveApprovedPayout;
+exports._reviewMessage = reviewMessage;

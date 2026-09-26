@@ -66,6 +66,8 @@ const schemeSchema = Joi.object({
   coverage: coverageSchema.optional(),
 });
 
+const clearableText = Joi.string().trim().max(100).allow('').optional();
+
 const schemas = {
   sendOtp: Joi.object({ phoneNumber: phoneNumberSchema }),
 
@@ -112,20 +114,24 @@ const schemas = {
    * string from multer, so coordinates are coerced and range-checked here rather
    * than being trusted and stored as NaN. The media type is not among them: it
    * is derived from the uploaded file's own verified type.
+   *
+   * A photo taken with geolocation refused has no coordinates, and that is a
+   * valid state: the pair is either both present or both absent (an empty field
+   * counts as absent), never a stand-in value the farmer did not give.
    */
   claimUpload: Joi.object({
     parcel_id: Joi.string().max(100).required().messages({ 'any.required': 'parcel_id (claim document ID) is required' }),
     step_id: Joi.string().max(100).required().messages({ 'any.required': 'step_id is required' }),
-    lat: Joi.number().min(-90).max(90).required().messages({
-      'any.required': 'Latitude is required',
+    lat: Joi.number().min(-90).max(90).empty('').allow(null).optional().messages({
       'number.base': 'Latitude must be a number',
     }),
-    lon: Joi.number().min(-180).max(180).required().messages({
-      'any.required': 'Longitude is required',
+    lon: Joi.number().min(-180).max(180).empty('').allow(null).optional().messages({
       'number.base': 'Longitude must be a number',
     }),
     client_ts: Joi.number().integer().min(0).optional(),
-  }),
+  })
+    .and('lat', 'lon')
+    .messages({ 'object.and': 'Latitude and longitude must be sent together, or both left out' }),
 
   completeClaim: Joi.object({
     documentId: Joi.string().max(100).required(),
@@ -139,22 +145,29 @@ const schemas = {
     payoutAmount: Joi.number().min(0).max(100000000).optional(),
   }),
 
+  /**
+   * Every optional text field accepts an explicit empty string, which means
+   * "clear this": the controller unsets the stored value instead of keeping it.
+   */
   updateProfile: Joi.object({
     fullName: Joi.string().max(100).optional(),
     email: Joi.string().email().allow('').optional(),
     address: Joi.object({
-      village: Joi.string().max(100).optional(),
-      district: Joi.string().max(100).optional(),
-      state: Joi.string().max(100).optional(),
+      village: clearableText,
+      district: clearableText,
+      state: clearableText,
       pincode: Joi.string()
         .pattern(/^\d{6}$/)
+        .allow('')
         .optional()
         .messages({ 'string.pattern.base': 'Pincode must be 6 digits' }),
     }).optional(),
     farmDetails: Joi.object({
-      totalArea: Joi.number().positive().max(100000).optional(),
+      totalArea: Joi.number().positive().max(100000).allow('', null).optional(),
       crops: Joi.array().items(Joi.string().max(100)).max(50).optional(),
-      landRegistrationNo: Joi.string().max(100).optional(),
+      landRegistrationNo: clearableText,
+      primaryCrop: clearableText,
+      soilType: clearableText,
     }).optional(),
   }),
 

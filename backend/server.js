@@ -79,11 +79,8 @@ if (process.env.TRUST_PROXY) {
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
-    // Claim evidence under /uploads has to be loadable by the frontend, which
-    // runs on a different origin, so helmet's default same-origin CORP is
-    // relaxed here. This widens who may embed an upload, not who may read one:
-    // the filenames are unguessable and nosniff still applies.
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Helmet's same-origin CORP stays the default for the API. Only /uploads
+    // is relaxed, below, because that is the one path the frontend embeds.
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -136,12 +133,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Claim evidence. `index: false` so the directory is never listed, and nosniff
 // so a stored file cannot be re-interpreted as a script by the browser.
+//
+// The frontend runs on a different origin (another port in development), and
+// a same-origin Cross-Origin-Resource-Policy makes the browser refuse to render
+// its <img> thumbnails. CORP is relaxed for this path only. That widens who may
+// embed an upload, not who may read one: filenames are unguessable, nosniff
+// still applies, and CORS still governs script access.
 app.use(
   '/uploads',
   express.static(path.join(__dirname, 'uploads'), {
     index: false,
     dotfiles: 'deny',
-    setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
   })
 );
 

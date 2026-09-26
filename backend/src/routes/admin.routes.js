@@ -13,6 +13,7 @@ router.patch('/users/:id/toggle-active', validateObjectId('id'), ctrl.toggleUser
 router.get('/claims', ctrl.allClaims);
 router.get('/claims/:id', validateObjectId('id'), ctrl.getClaimDetail);
 router.patch('/claims/:id/review', validateObjectId('id'), validate(schemas.adminReview), ctrl.reviewClaim);
+router.patch('/claims/:id/release-payout', validateObjectId('id'), ctrl.releasePayout);
 router.get('/activity-logs', ctrl.activityLogs);
 
 module.exports = router;
