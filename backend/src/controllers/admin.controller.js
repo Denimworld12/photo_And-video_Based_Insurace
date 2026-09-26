@@ -35,9 +35,21 @@ const resolveApprovedPayout = (claim, requestedAmount) => {
   return Number.isFinite(calculated) && calculated >= 0 ? calculated : null;
 };
 
-// A claim counts as paid once its status or its payout record says the money
-// left the system; either one alone is written by a settled payout.
-const DISBURSED_FILTER = { $or: [{ status: 'payout_complete' }, { payoutStatus: 'completed' }] };
+// Written only by releasePayout, so a claim counts as paid once an admin has
+// explicitly released its payout - never merely because it was approved.
+const DISBURSED_FILTER = { status: 'payout_complete', payoutStatus: 'completed' };
+
+// The state a claim must be in for its payout to be released: approved, with a
+// non-zero amount still waiting to be paid.
+const RELEASABLE_FILTER = { status: 'approved', payoutStatus: 'pending', payoutAmount: { $gt: 0 } };
+
+/** Why a claim's payout cannot be released, or null when it can. */
+const payoutReleaseBlocker = (claim) => {
+  if (claim.status === 'payout_complete') return 'This payout has already been released';
+  if (claim.status !== 'approved') return `Claim is ${claim.status}; only an approved claim can have its payout released`;
+  if (claim.payoutStatus !== 'pending' || !(claim.payoutAmount > 0)) return 'This claim has no pending payout to release';
+  return null;
+};
 
 const readPaging = (req, { defaultLimit = 20, maxLimit = 100 } = {}) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -218,7 +230,9 @@ exports.allClaims = async (req, res) => {
 /* ─── Get Claim Detail (Admin) ─── */
 exports.getClaimDetail = async (req, res) => {
   try {
-    const claim = await Claim.findById(req.params.id).populate('userId', 'phoneNumber fullName address farmDetails');
+    const claim = await Claim.findById(req.params.id)
+      .populate('userId', 'phoneNumber fullName address farmDetails')
+      .populate('payoutReleasedBy', 'phoneNumber fullName');
     if (!claim) return res.status(404).json({ success: false, error: 'Claim not found' });
 
     // Build fallback URLs for images missing cloudinaryUrl
@@ -320,6 +334,64 @@ exports.reviewClaim = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN:REVIEW] Failed to review claim:', err.message);
     res.status(500).json({ success: false, error: 'Failed to review claim' });
+  }
+};
+
+/* ─── Release Payout ─── */
+exports.releasePayout = async (req, res) => {
+  try {
+    const releasedAt = new Date();
+    // The state check and the write are one atomic update, so two admins
+    // releasing the same claim at once cannot both record a disbursement.
+    const claim = await Claim.findOneAndUpdate(
+      { _id: req.params.id, ...RELEASABLE_FILTER },
+      {
+        $set: {
+          status: 'payout_complete',
+          payoutStatus: 'completed',
+          payoutReleasedBy: req.user._id,
+          payoutDate: releasedAt,
+        },
+      },
+      { new: true }
+    );
+
+    if (!claim) {
+      const current = await Claim.findById(req.params.id);
+      if (!current) return res.status(404).json({ success: false, error: 'Claim not found' });
+      return res.status(409).json({
+        success: false,
+        error: payoutReleaseBlocker(current) || 'The payout could not be released',
+      });
+    }
+
+    await AdminAction.create({
+      adminId: req.user._id,
+      action: 'process_payout',
+      targetType: 'claim',
+      targetId: claim._id.toString(),
+      details: { payoutAmount: claim.payoutAmount, releasedAt },
+      ipAddress: req.ip,
+    });
+
+    if (claim.userId) {
+      try {
+        await Notification.create({
+          userId: claim.userId,
+          title: 'Payout Released',
+          message: `The payout of INR ${claim.payoutAmount.toLocaleString('en-IN')} for your claim ${claim.documentId} has been released.`,
+          type: 'claim_update',
+          relatedClaim: claim._id,
+        });
+      } catch (err) {
+        console.error(`[ADMIN:PAYOUT] Notification not created for claim ${claim.documentId}:`, err.message);
+      }
+    }
+
+    res.json({ success: true, claim });
+  } catch (err) {
+    console.error('[ADMIN:PAYOUT] Failed to release payout:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to release payout' });
   }
 };
 

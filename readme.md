@@ -426,12 +426,13 @@ the `admin` role. A claim belonging to another user is reported as not found.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/dashboard` | Platform statistics and recent claims. `totalPayout` sums `payoutAmount` over paid-out claims only |
+| `GET` | `/dashboard` | Platform statistics and recent claims. `totalPayout` sums `payoutAmount` over claims whose payout an admin has released |
 | `GET` | `/users` | Accounts. Query: `page`, `limit`, `search` |
 | `PATCH` | `/users/:id/toggle-active` | Activate or deactivate an account |
 | `GET` | `/claims` | All claims, with `confidenceScore` (null when nothing measured it). Query: `page`, `limit`, `status`, `search` |
 | `GET` | `/claims/:id` | One claim in full, with evidence and AI assessment |
 | `PATCH` | `/claims/:id/review` | Record a decision. Body: `status`, `reviewNotes`, `payoutAmount`. An explicit `payoutAmount: 0` approves with nothing due; omitting it adopts the pipeline's figure |
+| `PATCH` | `/claims/:id/release-payout` | Release an approved claim's pending payout. Marks it `payout_complete`, records the releasing admin (`payoutReleasedBy`) and time (`payoutDate`), and from then on counts it in the dashboard's `totalPayout`. 409 unless the claim is approved with a non-zero pending payout |
 | `GET` | `/activity-logs` | Audit trail. Query: `page`, `limit` |
 
 ### Health

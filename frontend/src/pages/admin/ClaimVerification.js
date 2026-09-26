@@ -21,6 +21,7 @@ const STATUS_FILTERS = [
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'payout_pending', label: 'Payout pending' },
+  { key: 'payout_complete', label: 'Paid' },
 ];
 
 const NEEDS_REVIEW = ['submitted', 'processing', 'manual_review'];
@@ -42,6 +43,8 @@ export default function ClaimVerification() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({ status: '', payoutAmount: '', reviewNotes: '' });
   const [reviewErrors, setReviewErrors] = useState({});
+  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [releasing, setReleasing] = useState(false);
 
   const fetchClaims = useCallback(async () => {
     try {
@@ -145,6 +148,26 @@ export default function ClaimVerification() {
       setConfirmOpen(false);
     } finally {
       setReviewing(false);
+    }
+  };
+
+  const releasePayout = async () => {
+    try {
+      setReleasing(true);
+      const { data } = await api.patch(`/api/admin/claims/${selected._id}/release-payout`);
+      if (data.success) {
+        setClaims((prev) => prev.map((c) => (c._id === selected._id ? { ...c, status: data.claim.status } : c)));
+        const farmer = selected.userId?.fullName || selected.userId?.phoneNumber || 'the farmer';
+        toast.success(`Payout of ₹${data.claim.payoutAmount.toLocaleString('en-IN')} released to ${farmer}.`);
+        setSelected(null);
+      } else {
+        toast.error(data.error || 'The payout was not released. Nothing has changed.');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'The payout was not released. Nothing has changed.');
+    } finally {
+      setReleaseOpen(false);
+      setReleasing(false);
     }
   };
 
@@ -350,6 +373,8 @@ export default function ClaimVerification() {
           setReviewErrors={setReviewErrors}
           onSubmit={requestReview}
           reviewing={reviewing}
+          onRelease={() => setReleaseOpen(true)}
+          releasing={releasing}
           needsReview={needsReview(selected.status)}
           suggested={suggestedPayout(selected)}
           fmt={fmt}
@@ -398,6 +423,25 @@ export default function ClaimVerification() {
               : 'Approve with no payout'
         }
       />
+
+      <ConfirmDialog
+        open={releaseOpen}
+        busy={releasing}
+        onCancel={() => setReleaseOpen(false)}
+        onConfirm={releasePayout}
+        title="Release this payout?"
+        description="Confirm the money has been sent to the farmer. The claim is marked paid, the farmer is notified, and the decision can no longer be changed."
+        summary={
+          selected
+            ? [
+                { label: 'Claim', value: selected.documentId },
+                { label: 'Farmer', value: selected.userId?.fullName || selected.userId?.phoneNumber || '—' },
+                { label: 'Payout', value: `₹${(selected.payoutAmount || 0).toLocaleString('en-IN')}` },
+              ]
+            : []
+        }
+        confirmLabel="Release payout"
+      />
     </div>
   );
 }
@@ -433,6 +477,8 @@ function ClaimDetail({
   setReviewErrors,
   onSubmit,
   reviewing,
+  onRelease,
+  releasing,
   needsReview,
   suggested,
   fmt,
@@ -686,6 +732,30 @@ function ClaimDetail({
                 {claim.payoutAmount > 0
                   ? `Payout ₹${claim.payoutAmount.toLocaleString('en-IN')}`
                   : 'Approved with no payout due'}
+              </p>
+              {claim.reviewNotes && <p className="mt-1 text-body text-saddle">{claim.reviewNotes}</p>}
+              {claim.payoutStatus === 'pending' && claim.payoutAmount > 0 && (
+                <button type="button" onClick={onRelease} disabled={releasing} className="btn btn-primary mt-3">
+                  {releasing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Banknote className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  Release payout
+                </button>
+              )}
+            </div>
+          )}
+          {claim.status === 'payout_complete' && (
+            <div className="rounded-md border border-sage bg-sage/10 px-4 py-3">
+              <p className="flex items-center gap-2 text-body font-medium text-deep-olive">
+                <Banknote className="h-4 w-4" aria-hidden="true" /> Paid
+              </p>
+              <p className="mt-1 text-body text-ink">
+                ₹{(claim.payoutAmount || 0).toLocaleString('en-IN')} released {fmt(claim.payoutDate)}
+                {claim.payoutReleasedBy
+                  ? ` by ${claim.payoutReleasedBy.fullName || claim.payoutReleasedBy.phoneNumber}`
+                  : ''}
               </p>
               {claim.reviewNotes && <p className="mt-1 text-body text-saddle">{claim.reviewNotes}</p>}
             </div>
