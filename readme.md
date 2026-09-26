@@ -61,7 +61,7 @@ auto-rejected. An administrator has the final decision on every payout.
 | Role | Can do |
 |------|--------|
 | **Farmer** | Browse policies, file claims, capture GPS-tagged evidence, track status, read the AI assessment, download a PDF report, resubmit a rejected claim |
-| **Administrator** | Review and approve or reject claims with a payout amount, manage policies, activate and deactivate accounts, read the audit log |
+| **Administrator** | Review and approve or reject claims with a payout amount, release approved payouts, publish, unpublish and republish policies, activate and deactivate accounts, read the audit log |
 
 A user becomes an administrator by signing in with the phone number in `ADMIN_PHONE_NUMBER`.
 
